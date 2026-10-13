@@ -17,6 +17,7 @@ La entrada implementada requiere una factura creada y emitida. El checkout nativ
 
 ## Publicación
 
+- [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md): etiqueta de reemplazo, entrada desde GTM y condición pendiente del paso nativo de reserva.
 - [DESPLIEGUE_GITHUB_VERCEL.md](DESPLIEGUE_GITHUB_VERCEL.md): variables, despliegue y tarea programada.
 - [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md): contrato de entrada, eventos, registro del pago y activación.
 - [PASOS_PENDIENTES_STOREGANISE.md](PASOS_PENDIENTES_STOREGANISE.md): configuración externa que falta.

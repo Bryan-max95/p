@@ -3,7 +3,7 @@ const say = (language: Language, es: string, en: string) => language === 'es' ? 
 
 /** Only these application-owned codes reach customers; never a raw provider message. */
 export function paymentFailureCode(reason: string | null | undefined, status: string | null | undefined): string {
-  if(['INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED'].includes(reason??''))return 'STOREGANISE_ORDER_CHANGED';
+  if(['INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE'].includes(reason??''))return 'STOREGANISE_ORDER_CHANGED';
   if (status === 'AUTHORIZED_CAPTURE_FAILED') return 'CAPTURE_FAILED';
   if (status === 'AUTHORIZED_CAPTURE_UNCONFIRMED') return 'CAPTURE_NOT_CONFIRMED';
   if (['HTTP_401', 'HTTP_403', 'HTTP_404', 'AUTHENTICATION_SETUP_FAILED'].includes(status ?? '') ||
@@ -19,7 +19,7 @@ export function paymentFailureCode(reason: string | null | undefined, status: st
 }
 
 export function paymentFailureMessage(reason: string | undefined, status: string | undefined, language: Language) {
-  if(['STOREGANISE_ORDER_CHANGED','INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED'].includes(reason??''))return say(language,'La reserva o su saldo cambió en Storeganise. Regrese a su cuenta y abra nuevamente el enlace de pago.','Your booking or balance changed in Storeganise. Return to your account and open the payment link again.');
+  if(['STOREGANISE_ORDER_CHANGED','INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE'].includes(reason??''))return say(language,'La reserva o su saldo cambió en Storeganise. Regrese a su cuenta y abra nuevamente el enlace de pago.','Your booking or balance changed in Storeganise. Return to your account and open the payment link again.');
   if(reason==='BILLING_DETAILS_REQUIRED')return say(language,'Complete la dirección de facturación de su tarjeta para continuar.','Complete your card billing address to continue.');
   if(reason?.startsWith('STOREGANISE_'))return say(language,'No se pudo confirmar su reserva con Storeganise. Intente más tarde; no se inició el cobro.','Your booking could not be confirmed with Storeganise. Try later; no charge was started.');
   if (reason === 'CAPTURE_FAILED' || status === 'AUTHORIZED_CAPTURE_FAILED') {

@@ -10,7 +10,7 @@ Subir los archivos fuente, pnpm-lock.yaml, vercel.json y la documentación media
 
 1. Importar el repositorio como Next.js y seleccionar la carpeta de package.json.
 2. Instalación: pnpm install --frozen-lockfile. Compilación: pnpm build. No colocar pruebas bancarias ni pay:setup en el comando de compilación.
-3. Usar la detección de salida de Next.js. next.config.ts separa .next para desarrollo de .next-production para compilación.
+3. Usar la detección de salida de Next.js. next.config.ts utiliza .next, según el ajuste del comercio para Vercel.
 4. Copiar las variables privadas a Vercel. .env.local no se transfiere desde GitHub.
 5. Configurar el dominio payroatanselfstorage.com y PAY_PUBLIC_URL con el origen HTTPS exacto. Volver a desplegar cuando cambien las variables.
 

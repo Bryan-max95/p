@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
 import { assertStoreganiseEnabled, StoreganiseIntegrationError, storeganiseReturnUrl } from './config';
-import { assertPayable, getJob, getUser, invoiceContext, sgId, usdAmount } from './records';
+import { assertOrderActive, assertPayable, getJob, getUser, invoiceContext, sgId, usdAmount } from './records';
 import { storeganiseGet } from './client';
 import { createCheckoutSession, requiredUrl } from '../pay/service';
 import { transaction } from '../pay/db';
@@ -12,7 +12,7 @@ import type { BillTo } from '../cybersource/types';
 import type { SessionRow, StoreganiseContext } from '../pay/types';
 
 export const checkoutIdsSchema = z.object({ userId: sgId, invoiceId: sgId.optional(), orderId: sgId.optional(),
-  jobId: sgId.optional(), returnUrl: z.string().url().max(2000).optional(),
+  jobId: sgId.optional(), siteId:sgId.optional(), returnUrl: z.string().url().max(2000).optional(),
 }).refine(value => Boolean(value.invoiceId || value.orderId || value.jobId), 'An invoice or order ID is required');
 
 export async function resolveCheckout(value: unknown) {
@@ -22,11 +22,13 @@ export async function resolveCheckout(value: unknown) {
   const orderId = ids.orderId ?? ids.jobId;
   const job = orderId ? await getJob(orderId) : undefined;
   if (job && (job.ownerId !== ids.userId || job.type !== 'unit_moveIn')) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+  if(job)assertOrderActive(job);
   const invoiceId = ids.invoiceId ?? job?.result.invoiceId;
   // Native "add card" checkout may precede confirmation/invoice creation. Do not
   // guess the balance from a unit's advertised rent, or choose a user's latest invoice.
   if (!invoiceId) throw new StoreganiseIntegrationError('ORDER_REQUIRES_CONFIRMED_INVOICE');
   const context = await invoiceContext(invoiceId, ids.userId, orderId);
+  if(ids.siteId&&context.invoice.siteId!==ids.siteId)throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH',403);
   const [user, settings] = await Promise.all([getUser(ids.userId), storeganiseGet<{ currencyCode: string; manualPaymentMethods?: Array<{ code: string }> }>('/settings')]);
   if (user.isDisabled) throw new StoreganiseIntegrationError('CUSTOMER_DISABLED', 403);
   if (settings.currencyCode !== 'USD' || (context.invoice.currencyCode && context.invoice.currencyCode !== 'USD') ||
@@ -73,6 +75,10 @@ export async function openStoreganiseCheckout(value: unknown) {
           [session.id,amount,hnlCharge(amount,rate.hnlPerUsd),rate.hnlPerUsd,rate.rateDate,rate.fetchedAt]);
           session = renewed.rows[0];
         }
+      }
+      if(context.returnUrl!==session.return_url){
+        await client.query('UPDATE pay_sessions SET return_url=$2,updated_at=now() WHERE id=$1',[session.id,context.returnUrl]);
+        session.return_url=context.returnUrl;
       }
     } else {
       assertPayable(context);

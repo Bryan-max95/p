@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { query, transaction } from '../pay/db';
 import type { SessionRow } from '../pay/types';
 import { assertStoreganiseEnabled, StoreganiseIntegrationError } from './config';
-import { getInvoice, getJob, getUnit, invoiceContext } from './records';
+import { assertOrderActive, getInvoice, getJob, getUnit, invoiceContext } from './records';
 import { storeganiseRequest, StoreganiseApiError } from './client';
 
 interface Delivery {
@@ -98,6 +98,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
     if (job && ['cancelled','canceled','failed'].includes(job.state)) {
       await saveProgress(delivery,'review','MOVE_IN_REQUIRES_REVIEW',payment.id); return;
     }
+    if(job)assertOrderActive(job);
     // Complete only the payment-dependent step of this exact paid initial invoice.
     // Never skip agreement/identity checks or directly force a unit to "occupied".
     const invoiceStep = job?.steps.find(step => step.type === 'invoice_createInitial' &&

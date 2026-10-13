@@ -26,6 +26,7 @@ import { SecureCardFields, type SecureCardHandle, type CardBrand } from './secur
 import { usePaymentSession } from '@/hooks/use-payment-session';
 import { paymentFailureMessage } from '@/lib/pay/payment-feedback';
 import { BillingDetailsFields, readBillingDetails } from './billing-details-fields';
+import { StoreganiseReturn } from './storeganise-return';
 import { BankAuthentication } from './bank-authentication';
 import { demoScenarioForAmount, DEMO_AMOUNTS, DEMO_SCENARIOS, demoCurrency, DEFAULT_DEMO_SCENARIO } from '@/lib/pay/demo-scenarios';
 
@@ -918,6 +919,9 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                         : (lang==='es'?'Estamos registrando su pago en Storeganise. No vuelva a pagar; la confirmación se actualizará automáticamente.':'We are registering your payment in Storeganise. Do not pay again; confirmation will update automatically.')}</p>
                   {payment.session.storeganise.status!=='active'&&<button type="button" onClick={()=>void payment.refresh().catch(()=>{})} className="font-bold underline text-xs">{lang==='es'?'Actualizar estado':'Refresh status'}</button>}
                 </div>}
+
+                {payment.session?.receipt&&payment.session.storeganise?.status==='active'&&
+                  <StoreganiseReturn sessionId={payment.session.id} url={payment.session.storeganise.returnUrl} language={lang} />}
 
                 {/* Recibo digital con bordes limpios */}
                 <div className="bg-[#f8fafc] rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">

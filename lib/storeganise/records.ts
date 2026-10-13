@@ -19,7 +19,7 @@ export const unitSchema = z.object({ id, siteId: id, name: z.string(), state: z.
   ownerId: id.nullable().optional(), rentalId: id.nullable().optional(),
 }).passthrough();
 export const jobSchema = z.object({ id, ownerId: id, type: z.string(), state: z.string(),
-  result: z.object({ invoiceId: id.optional(), unitRentalId: id.optional(), unitId: id.optional(), siteId: id.optional() }).passthrough(),
+  result: z.object({ invoiceId: id.optional(), unitRentalId: id.optional(), unitId: id.optional(), siteId: id.optional(), orderState:z.string().optional() }).passthrough(),
   steps: z.array(z.object({ id: z.string().min(1).max(100), type: z.string(), state: z.string(),
     result: z.object({ invoiceId: id.optional() }).passthrough().optional(), requiresInput: z.boolean().optional(),
   }).passthrough()),
@@ -64,9 +64,17 @@ export async function invoiceContext(invoiceId: string, customerId: string, orde
 
 export function assertPayable(context: Awaited<ReturnType<typeof invoiceContext>>) {
   const { invoice, rental, unit, job } = context;
+  if(job)assertOrderActive(job);
   if (invoice.deleted || !['sent', 'overdue'].includes(invoice.state) || invoice.balance <= 0 ||
     ['cancelled', 'canceled', 'archived', 'ended'].includes(rental.state) || rental.endDate ||
     ['archived', 'blocked', 'unassigned'].includes(unit.state) ||
     (job && ['cancelled', 'canceled', 'failed'].includes(job.state))) throw new StoreganiseIntegrationError('INVOICE_NOT_PAYABLE');
   usdAmount(invoice.balance);
+}
+
+export function assertOrderActive(job:z.infer<typeof jobSchema>) {
+  // An abandoned order can retain job.state=ready (e.g. a notification failed).
+  // Validate its business state independently from the job runner state.
+  if(['abandoned','cancelled','canceled','expired','failed'].includes(job.result.orderState??'')||
+    ['cancelled','canceled','failed'].includes(job.state))throw new StoreganiseIntegrationError('ORDER_NOT_ACTIVE');
 }

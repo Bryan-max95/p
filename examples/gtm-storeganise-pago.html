@@ -1,0 +1,47 @@
+<script>
+(function () {
+  "use strict";
+
+  // Replace the previous GTM tag with this tag. No keys, prices or customer tokens.
+  var STORE_ORIGIN = "https://roatanselfstorage.storeganise.com";
+  var CHECKOUT_PATH = "/api/v1/billing/custom";
+  if (window.location.origin !== STORE_ORIGIN || window.__BWP_NATIVE_PAYMENT_ACTIVE__) return;
+  window.__BWP_NATIVE_PAYMENT_ACTIVE__ = true;
+
+  function nativeDestination(element) {
+    var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
+    if (!href) return null;
+    var target;
+    try { target = new URL(href, STORE_ORIGIN); } catch (error) { return null; }
+    if (target.origin !== STORE_ORIGIN || target.pathname !== CHECKOUT_PATH || target.username || target.password) return null;
+
+    var page = new URL(window.location.href);
+    var orderId = target.searchParams.get("orderId") || page.searchParams.get("orderId");
+    if (orderId && !/^[a-f0-9]{24}$/i.test(orderId)) return null;
+    if (orderId) target.searchParams.set("orderId", orderId);
+    // Keep Storeganise's original returnUrl (including its own resume parameters).
+    if (!target.searchParams.get("returnUrl")) target.searchParams.set("returnUrl", page.href);
+    return target.href;
+  }
+
+  function continuePayment(event) {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    var node = event.target;
+    if (node && node.nodeType !== 1) node = node.parentElement;
+    if (!node || typeof node.closest !== "function") return;
+    var link = node.closest("a[href]");
+    if (!link) return;
+    var destination = nativeDestination(link);
+    if (!destination) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    // Storeganise identifies the customer and issues the signed billing.checkout.
+    // Pay then creates the private session; this script does not assert identity.
+    window.location.assign(destination);
+  }
+
+  // Capture before the old tag's document listener if both are temporarily loaded.
+  // Buttons handled by Storeganise/React keep their own authenticated handler.
+  window.addEventListener("click", continuePayment, true);
+})();
+</script>

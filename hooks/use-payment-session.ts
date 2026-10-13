@@ -218,7 +218,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
       return acceptResponse(await paymentRequest<PaymentResponse>(path, body));
     } catch (failure) {
       if (failure instanceof PaymentRequestError && ['INVALID_PAYMENT_DATA', 'CARD_EXPIRED', 'BILLING_DETAILS_REQUIRED',
-        'INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','STOREGANISE_CHECKOUT_UNAVAILABLE',
+        'INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE','STOREGANISE_CHECKOUT_UNAVAILABLE',
         'STOREGANISE_PAY_DISABLED','STOREGANISE_SANDBOX_INSTANCE_REQUIRED','STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH'].includes(failure.code)) {
         setRequestError(failure.code); setUncertain(false); return;
       }

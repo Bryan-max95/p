@@ -1,23 +1,32 @@
-import type {NextConfig} from 'next';
+
+
+import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // Keep a running development server from overwriting the deployable build.
-  distDir: process.env.NODE_ENV === 'development' ? '.next' : '.next-production',
+
+  // Carpeta estándar de compilación para Vercel y Next.js.
+  // Corrige el error: The Next.js output directory ".next" was not found.
+  distDir: '.next',
+
+  // Configuración de ESLint.
   eslint: {
     ignoreDuringBuilds: true,
   },
+
+  // Verificación de TypeScript durante la compilación.
   typescript: {
     ignoreBuildErrors: false,
   },
-  // Allow access to remote image placeholder.
+
+  // Configuración de imágenes externas autorizadas.
   images: {
     remotePatterns: [
       {
         protocol: 'https',
         hostname: 'picsum.photos',
         port: '',
-        pathname: '/**', // This allows any path under the hostname
+        pathname: '/**',
       },
       {
         protocol: 'https',
@@ -31,23 +40,42 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // Use the standard Next.js build for Vercel and local `next start`.
+
+  // Paquetes que Next.js debe transpilar.
   transpilePackages: ['motion'],
+
+  // Encabezados HTTP de seguridad.
   async headers() {
-    return [{ source: '/:path*', headers: [
-      { key: 'X-Content-Type-Options', value: 'nosniff' },
-      { key: 'Referrer-Policy', value: 'no-referrer' },
-      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-    ] }];
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff',
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'no-referrer',
+          },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
+        ],
+      },
+    ];
   },
-  webpack: (config, {dev}) => {
-    // HMR is disabled in AI Studio via DISABLE_HMR env var.
-    // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
+
+  // Configuración de Webpack.
+  webpack: (config, { dev }) => {
+    // Desactivar Hot Module Replacement cuando sea necesario.
     if (dev && process.env.DISABLE_HMR === 'true') {
       config.watchOptions = {
         ignored: /.*/,
       };
     }
+
     return config;
   },
 };

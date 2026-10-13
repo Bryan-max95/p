@@ -1,0 +1,13 @@
+.env*
+!.env.example
+.private/
+.git/
+.next/
+.next-production/
+node_modules/
+.pnpm-store/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+*.log

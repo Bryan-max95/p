@@ -1,0 +1,2 @@
+-- Reference schema. The application creates these tables idempotently at startup.
+-- See lib/pay/db.ts for the executable definition.

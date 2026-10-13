@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.next-production/
+.pnpm-store/
+.env*
+!.env.example
+.private/
+*.tsbuildinfo
+coverage/
+.vercel/
+playwright-report/
+test-results/
+*.log
+

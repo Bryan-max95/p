@@ -2,26 +2,192 @@
 (function () {
   "use strict";
 
-  // Replace the previous GTM tag with this tag. No keys, prices or customer tokens.
+  // Replace the previous payment tag completely. Keep only one payment tag.
+  var PAYMENT_URL = "https://www.payroatanselfstorage.com/";
   var STORE_ORIGIN = "https://roatanselfstorage.storeganise.com";
   var CHECKOUT_PATH = "/api/v1/billing/custom";
-  if (window.location.origin !== STORE_ORIGIN || window.__BWP_NATIVE_PAYMENT_ACTIVE__) return;
-  window.__BWP_NATIVE_PAYMENT_ACTIVE__ = true;
+  if (window.location.origin !== STORE_ORIGIN || window.__BWP_PAY_SESSION_ACTIVE__) return;
+  window.__BWP_PAY_SESSION_ACTIVE__ = true;
+  var preparing = false;
 
-  function nativeDestination(element) {
+  function nativeLink(element) {
     var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
     if (!href) return null;
     var target;
     try { target = new URL(href, STORE_ORIGIN); } catch (error) { return null; }
     if (target.origin !== STORE_ORIGIN || target.pathname !== CHECKOUT_PATH || target.username || target.password) return null;
 
+    return target;
+  }
+
+  function isPaymentButton(element) {
+    if (nativeLink(element)) return true;
+    var label = (element.textContent || "").trim().toLowerCase().replace(/\s+/g, " ");
+    return element.getAttribute("data-bwp-payment-ready") === "true" ||
+      label === "añadir un método de pago" || label === "agregar un método de pago" ||
+      label === "add payment method" || label === "continuar a métodos de pago";
+  }
+
+  function checkoutDestination(element) {
     var page = new URL(window.location.href);
-    var orderId = target.searchParams.get("orderId") || page.searchParams.get("orderId");
-    if (orderId && !/^[a-f0-9]{24}$/i.test(orderId)) return null;
-    if (orderId) target.searchParams.set("orderId", orderId);
-    // Keep Storeganise's original returnUrl (including its own resume parameters).
-    if (!target.searchParams.get("returnUrl")) target.searchParams.set("returnUrl", page.href);
+    var target = nativeLink(element) || new URL(CHECKOUT_PATH, STORE_ORIGIN);
+    var fromLink = target.searchParams.get("orderId");
+    var fromPage = page.searchParams.get("orderId");
+    if (fromLink && fromPage && fromLink !== fromPage) throw new Error("RESERVATION_CHANGED");
+    var orderId = fromLink || fromPage;
+    if (!orderId || !/^[a-f0-9]{24}$/i.test(orderId)) throw new Error("RESERVATION_REQUIRED");
+    target.searchParams.set("orderId", orderId);
+    var siteId = target.searchParams.get("siteId") || page.searchParams.get("siteId");
+    if (siteId) {
+      if (!/^[a-f0-9]{24}$/i.test(siteId)) throw new Error("RESERVATION_CHANGED");
+      target.searchParams.set("siteId", siteId);
+    } else target.searchParams.delete("siteId");
+
+    // Keep Storeganise's own return parameters, including its resume marker.
+    var returnUrl = new URL(target.searchParams.get("returnUrl") || page.href, STORE_ORIGIN);
+    if (returnUrl.origin !== STORE_ORIGIN || returnUrl.username || returnUrl.password ||
+      /^\/(api|admin)(\/|$)/i.test(returnUrl.pathname)) throw new Error("RESERVATION_CHANGED");
+    var returnOrder = returnUrl.searchParams.get("orderId");
+    if (returnOrder && returnOrder !== orderId) throw new Error("RESERVATION_CHANGED");
+    returnUrl.searchParams.set("orderId", orderId);
+    target.searchParams.set("returnUrl", returnUrl.href);
     return target.href;
+  }
+
+  function payDestination(value) {
+    if (typeof value !== "string") return null;
+    var candidate;
+    try { candidate = new URL(value); } catch (error) { return null; }
+    var destination = new URL(PAYMENT_URL);
+    var tokens = candidate.searchParams.getAll("session");
+    if (candidate.origin !== destination.origin || candidate.pathname !== destination.pathname ||
+      candidate.username || candidate.password || tokens.length !== 1 ||
+      !/^[A-Za-z0-9_-]{43}$/.test(tokens[0])) return null;
+    destination.searchParams.set("session", tokens[0]);
+    return destination.href;
+  }
+
+  function hostedDestination(value) {
+    if (typeof value !== "string") return null;
+    var target;
+    try { target = new URL(value, STORE_ORIGIN); } catch (error) { return null; }
+    if (target.origin !== STORE_ORIGIN || target.username || target.password ||
+      /^\/admin(\/|$)/i.test(target.pathname) ||
+      (/^\/api(\/|$)/i.test(target.pathname) &&
+        target.pathname !== CHECKOUT_PATH && target.pathname.indexOf(CHECKOUT_PATH + "/") !== 0)) return null;
+    target.hash = "";
+    return target.href;
+  }
+
+  function responseDestination(body) {
+    var data;
+    try { data = JSON.parse(body); } catch (error) { /* The installed webhook returns HTML. */ }
+    if (data && typeof data === "object") {
+      var fromJson = payDestination(data.url);
+      if (fromJson) return fromJson;
+      // Some installations first return a hosted checkout URL on Storeganise.
+      var hosted = hostedDestination(data.url);
+      if (hosted) return hosted;
+      var code = typeof data.error === "string" ? data.error : data.error && data.error.code;
+      throw new Error(typeof code === "string" ? code : "CHECKOUT_NOT_CONNECTED");
+    }
+    // Read the response without evaluating scripts or inserting its HTML in the page.
+    var documentResponse = new DOMParser().parseFromString(body, "text/html");
+    var marker = documentResponse.querySelector('meta[name="pay-checkout-url"]');
+    var fromMarker = marker && payDestination(marker.getAttribute("content"));
+    if (fromMarker) return fromMarker;
+    // Also accept the single continuation link produced by the previous Pay handler.
+    var links = documentResponse.querySelectorAll("a[href]");
+    var found = null;
+    for (var i = 0; i < links.length; i++) {
+      var destination = payDestination(links[i].getAttribute("href"));
+      if (destination && found && found !== destination) throw new Error("CHECKOUT_NOT_CONNECTED");
+      if (destination) found = destination;
+    }
+    if (!found) throw new Error("CHECKOUT_NOT_CONNECTED");
+    return found;
+  }
+
+  function showStatus(element, text, failed) {
+    var status = document.getElementById("bwp-pay-checkout-status");
+    if (!status) {
+      status = document.createElement("p");
+      status.id = "bwp-pay-checkout-status";
+      status.style.cssText = "margin:12px 0;font-size:14px;line-height:1.5;";
+      element.insertAdjacentElement("afterend", status);
+    }
+    status.setAttribute("role", failed ? "alert" : "status");
+    status.style.color = failed ? "#991b1b" : "#334155";
+    status.textContent = text;
+  }
+
+  function errorMessage(code) {
+    if (code === "ORDER_REQUIRES_CONFIRMED_INVOICE") {
+      return "Su reserva todavía no está lista para cobrar. Complete su confirmación en Storeganise o contacte a Roatan Self Storage. No se realizó ningún cobro.";
+    }
+    if (code === "ORDER_NOT_ACTIVE" || code === "RESERVATION_CHANGED" || code === "RESERVATION_REQUIRED") {
+      return "Regrese a su reserva vigente y abra nuevamente el pago. No se realizó ningún cobro.";
+    }
+    if (code === "CUSTOMER_SESSION_REQUIRED") {
+      return "Inicie sesión nuevamente en Storeganise y abra el pago desde su reserva. No se realizó ningún cobro.";
+    }
+    return "No se pudo abrir el pago de su reserva. Intente nuevamente o contacte a Roatan Self Storage. No se realizó ningún cobro.";
+  }
+
+  function preparePayment(element) {
+    if (preparing) return;
+    preparing = true;
+    var priorBusy = element.getAttribute("aria-busy");
+    element.setAttribute("aria-busy", "true");
+    showStatus(element, "Preparando el pago de su reserva…", false);
+    var controller = new AbortController();
+    var timeout = window.setTimeout(function () { controller.abort(); }, 35000);
+    function finish() {
+      window.clearTimeout(timeout);
+      preparing = false;
+      if (priorBusy === null) element.removeAttribute("aria-busy");
+      else element.setAttribute("aria-busy", priorBusy);
+    }
+    var visited = [];
+    function requestCheckout(destination) {
+      if (visited.length >= 3 || visited.indexOf(destination) !== -1) return Promise.reject(new Error("CHECKOUT_NOT_CONNECTED"));
+      visited.push(destination);
+      // Reuse only the customer's existing same-origin session, as the native app does.
+      // Storeganise issues the signed webhook; GTM supplies no API keys or prices.
+      return fetch(destination, {
+        method: "GET", credentials: "include", cache: "no-store", redirect: "error",
+        headers: { Accept: visited.length === 1 ? "application/json" : "text/html, application/json;q=0.9" }, signal: controller.signal
+      }).then(function (response) {
+        if (response.status === 401 || response.status === 403) throw new Error("CUSTOMER_SESSION_REQUIRED");
+        return response.text().then(function (body) {
+          if (body.length > 131072) throw new Error("CHECKOUT_NOT_CONNECTED");
+          if (!response.ok) {
+            var failure;
+            try { failure = JSON.parse(body); } catch (error) { /* Generic error below. */ }
+            var code = failure && (typeof failure.error === "string" ? failure.error : failure.error && failure.error.code);
+            throw new Error(typeof code === "string" ? code : "CHECKOUT_NOT_CONNECTED");
+          }
+          return responseDestination(body);
+        });
+      }).then(function (next) {
+        var pay = payDestination(next);
+        if (pay) return pay;
+        var hosted = hostedDestination(next);
+        if (!hosted) throw new Error("CHECKOUT_NOT_CONNECTED");
+        return requestCheckout(hosted);
+      });
+    }
+    Promise.resolve().then(function () {
+      return requestCheckout(checkoutDestination(element));
+    }).then(function (destination) {
+      // This is the redirect to https://www.payroatanselfstorage.com/ with its session.
+      window.location.assign(destination);
+      window.clearTimeout(timeout);
+      // Keep the in-flight guard until navigation finishes to prevent double clicks.
+    }).catch(function (error) {
+      finish();
+      showStatus(element, errorMessage(error && error.message), true);
+    });
   }
 
   function continuePayment(event) {
@@ -29,19 +195,13 @@
     var node = event.target;
     if (node && node.nodeType !== 1) node = node.parentElement;
     if (!node || typeof node.closest !== "function") return;
-    var link = node.closest("a[href]");
-    if (!link) return;
-    var destination = nativeDestination(link);
-    if (!destination) return;
+    var element = node.closest("a, button");
+    if (!element || !isPaymentButton(element) || element.disabled || element.getAttribute("aria-disabled") === "true") return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    // Storeganise identifies the customer and issues the signed billing.checkout.
-    // Pay then creates the private session; this script does not assert identity.
-    window.location.assign(destination);
+    preparePayment(element);
   }
 
-  // Capture before the old tag's document listener if both are temporarily loaded.
-  // Buttons handled by Storeganise/React keep their own authenticated handler.
   window.addEventListener("click", continuePayment, true);
 })();
 </script>

@@ -40,9 +40,10 @@ export async function resolveCheckout(value: unknown) {
     firstName: user.firstName, lastName: user.lastName, email: user.email,
     address1: user.address ?? '', locality: '', country: '', postalCode: '',
   };
-  const binding: StoreganiseContext = { apiOrigin: url.origin, customerId: user.id, invoiceId: context.invoice.id,
+  const initialOrderId = orderId ?? (context.job && context.job.result.invoiceId === context.invoice.id ? context.job.id : undefined);
+  const binding: StoreganiseContext = { kind: 'invoice', apiOrigin: url.origin, customerId: user.id, invoiceId: context.invoice.id,
     rentalId: context.rental.id, unitId: context.unit.id, siteId: context.invoice.siteId,
-    ...(orderId ? { jobId: orderId } : {}),
+    ...(initialOrderId ? { jobId: initialOrderId } : {}),
   };
   return { ...context, environment, user, billTo, binding, returnUrl: storeganiseReturnUrl(ids.returnUrl) };
 }
@@ -54,14 +55,28 @@ export async function openStoreganiseCheckout(value: unknown) {
   // simultaneous checkouts could exhaust the pool while waiting for another one.
   const rate = ['sent','overdue'].includes(invoice.state)&&invoice.balance>0 ? await currentBchRate() : undefined;
   return transaction(async client => {
+    if (binding.jobId) await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg-order:${environment}:${binding.jobId}`]);
     // One quote/session per invoice, even when webhook calls arrive concurrently.
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg:${environment}:${invoice.id}`]);
-    const found = await client.query<SessionRow>('SELECT * FROM pay_sessions WHERE environment=$1 AND invoice_id=$2 FOR UPDATE', [environment, invoice.id]);
+    const found = await client.query<SessionRow>(`SELECT * FROM pay_sessions WHERE environment=$1 AND
+      (invoice_id=$2 OR event_id=$3) ORDER BY created_at FOR UPDATE`,
+    [environment, invoice.id, binding.jobId ? `storeganise-reservation-${environment}-${binding.jobId}` : '']);
+    if (found.rows.length > 1) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_REFRESH_REQUIRED');
     let session = found.rows[0];
     if (session) {
-      if (!session.storeganise_context || session.customer_id !== user.id || session.unit_id !== unit.id ||
-        session.storeganise_context.rentalId !== rental.id || session.storeganise_context.apiOrigin !== binding.apiOrigin) {
+      const reservation = session.storeganise_context?.kind === 'reservation';
+      if (!session.storeganise_context || session.customer_id !== user.id ||
+        (!reservation && (session.unit_id !== unit.id || session.storeganise_context.rentalId !== rental.id)) ||
+        (reservation && (session.storeganise_context.jobId !== binding.jobId || session.storeganise_context.siteId !== binding.siteId)) ||
+        session.storeganise_context.apiOrigin !== binding.apiOrigin) {
         throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+      }
+      if (reservation) {
+        if (!['open','declined'].includes(session.status) || needsLegacyPaymentReview(session)) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_REFRESH_REQUIRED');
+        assertPayable(context);
+        session = (await client.query<SessionRow>(`UPDATE pay_sessions SET invoice_id=$2,unit_id=$3,unit_name=$4,
+          storeganise_context=$5,updated_at=now() WHERE id=$1 RETURNING *`,
+        [session.id,invoice.id,unit.id,unit.name,JSON.stringify(binding)])).rows[0];
       }
       if (['open', 'declined'].includes(session.status) && !needsLegacyPaymentReview(session)) {
         assertPayable(context);
@@ -104,9 +119,13 @@ export async function openStoreganiseCheckout(value: unknown) {
 /** Re-check the same invoice just before authorization; the browser never supplies its price. */
 export async function verifyStoreganiseCheckout(session: SessionRow) {
   if (!session.storeganise_context) return;
+  if (session.storeganise_context.kind === 'reservation') {
+    const { prepareReservationForPayment } = await import('./reservation');
+    await prepareReservationForPayment(session);
+  }
   const { url, environment } = assertStoreganiseEnabled();
   const binding = session.storeganise_context;
-  if (session.environment !== environment || binding.apiOrigin !== url.origin || binding.customerId !== session.customer_id ||
+  if (!binding.invoiceId || !binding.rentalId || session.environment !== environment || binding.apiOrigin !== url.origin || binding.customerId !== session.customer_id ||
     binding.invoiceId !== session.invoice_id || binding.unitId !== session.unit_id) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
   const context = await invoiceContext(binding.invoiceId, binding.customerId, binding.jobId);
   assertPayable(context);

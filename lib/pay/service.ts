@@ -10,7 +10,7 @@ import { loadCredentials } from './credentials';
 import { needsLegacyPaymentReview } from './payment-state';
 import { paymentFailureCode } from './payment-feedback';
 import { billToSchema } from './billing-details';
-import { storeganiseReturnUrl } from '../storeganise/config';
+import { StoreganiseIntegrationError, storeganiseReturnUrl } from '../storeganise/config';
 import type { BchRate } from './bch';
 
 const sha = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
@@ -93,6 +93,7 @@ export function publicSession(row: SessionRow) {
     authenticationPending: row.status==='pending' && ['DEVICE_COLLECTION_REQUIRED','CHALLENGE_REQUIRED'].includes(row.gateway_status ?? ''),
     ...(['declined', 'unknown'].includes(status) ? { failureCode: legacyReview ? 'PAYMENT_NOT_CONFIRMED' : paymentFailureCode(row.failure_reason, row.gateway_status) } : {}),
     ...(row.storeganise_context ? {
+      requiresReservationConfirmation: row.storeganise_context.kind === 'reservation',
       storeganise: { status: row.storeganise_status ?? 'waiting_payment', paymentId: row.storeganise_payment_id ?? undefined,
         returnUrl: storeganiseReturnUrl(row.return_url) },
       billingRequired: !billToSchema.safeParse(row.bill_to).success,
@@ -102,9 +103,15 @@ export function publicSession(row: SessionRow) {
     ...(row.status==='succeeded'&&row.gateway_transaction_id?{receipt:{authCode:row.authorization_code,transactionId:row.gateway_transaction_id,date:(row.paid_at??row.created_at).toISOString(),cardLast4:row.card_last4,cardBrand:row.card_brand,amount:Number(row.amount).toFixed(2),unit:row.unit_name,client:row.client_name,currency:row.currency,...(priceReference ? { priceReference } : {})}}:{}) };
 }
 
-export async function beginAttempt(sessionId:string, tokenJti?:string, mode: 'payment' | 'authorization_only' = 'payment', billingDetails?: unknown) {
+export async function beginAttempt(sessionId:string, tokenJti?:string, mode: 'payment' | 'authorization_only' = 'payment', billingDetails?: unknown, expectedSession?: SessionRow) {
  return transaction(async client=>{ const locked=await client.query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1 FOR UPDATE',[sessionId]); const session=locked.rows[0];
    if (!session) throw new Error('Session missing');
+   if (expectedSession && (session.amount !== expectedSession.amount || session.currency !== expectedSession.currency ||
+     session.reference_usd_amount !== expectedSession.reference_usd_amount || session.usd_hnl_rate !== expectedSession.usd_hnl_rate ||
+     session.capture_context !== expectedSession.capture_context || session.invoice_id !== expectedSession.invoice_id ||
+     session.unit_id !== expectedSession.unit_id || session.customer_id !== expectedSession.customer_id)) {
+     throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
+   }
    if (session.environment !== gatewayEnvironment()) throw new Error('Session belongs to a different gateway environment');
    if (session.environment === 'production') {
      if (session.is_demo || mode !== 'payment') throw new Error('Test attempts cannot use production');

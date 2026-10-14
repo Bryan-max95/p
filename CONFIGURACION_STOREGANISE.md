@@ -1,8 +1,14 @@
 ﻿# Storeganise y Pay
 
-Estado del código al 13 de octubre de 2026. Implementado, sin ejecutar validaciones de esta actualización.
+Estado del código al 14 de octubre de 2026. Implementado, sin ejecutar validaciones de esta actualización.
 
-## Punto de entrada
+## Entrada desde la reserva mediante GTM
+
+El recorrido del botón de pago ahora utiliza [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md): GTM abre la API /api/storeganise/reservation de Pay; Pay autentica al cliente con su cuenta Storeganise y consulta su reserva y total. El carrusel puede abrirse sin factura interna previa. Al confirmar y pagar, el servidor envía la reserva y exige que Storeganise confirme su registro interno cobrable antes de autorizar la tarjeta. La factura fiscal del portal sigue siendo posterior al pago.
+
+Este recorrido incluye un inicio de sesión en Pay cuando no existe una sesión de cliente válida de Pay. El inicio de sesión que ya existe en otro dominio no se transfiere mediante una URL. Ver el archivo de conexión para publicar la etiqueta, los requisitos de autenticación y las automatizaciones pendientes de comprobar.
+
+## Punto de entrada alternativo firmado, con factura interna
 
 Pay recibe una factura interna de Storeganise ya creada, emitida y con saldo pendiente. Esa factura identifica la deuda; la factura fiscal continúa siendo responsabilidad del portal del comercio.
 
@@ -33,7 +39,7 @@ La función [examples/storeganise-handoff.ts](examples/storeganise-handoff.ts) m
 
 ## Qué configurar en Storeganise
 
-- Un handoff o personalización después de crear y emitir la factura para enviar la petición anterior y abrir su respuesta URL.
+- Para la entrada alternativa firmada, un handoff después de crear y emitir la factura. Para la entrada por reserva, la etiqueta y API descritas arriba.
 - API key con lectura de configuración, usuarios, facturas, alquileres, bodegas y entradas; además permiso para registrar pagos. Si se activa la finalización del paso de factura, también necesita actualizar ese paso de la entrada.
 - Un método de pago externo con código card, o su código real en STOREGANISE_CARD_PAYMENT_METHOD. El registro API usa type manual porque el banco cobra fuera de Storeganise; el método mostrado corresponde al código de tarjeta configurado.
 - Automatizaciones y requisitos de entrada que permitan completar la ocupación después de pagar. Pay no firma contratos, aprueba identidad ni modifica directamente la bodega para saltar pasos.

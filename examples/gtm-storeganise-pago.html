@@ -2,87 +2,73 @@
 (function () {
   "use strict";
 
-  // Replace the previous payment tag completely, publish, then reload Storeganise.
-  // Pay's server sets the final destination with:
-  // PAY_PUBLIC_URL=https://www.payroatanselfstorage.com
   var STORE_ORIGIN = "https://roatanselfstorage.storeganise.com";
-  var CHECKOUT_PATH = "/api/v1/billing/custom";
-  if (window.location.origin !== STORE_ORIGIN || window.__BWP_PAY_NATIVE_ACTIVE__) return;
-  window.__BWP_PAY_NATIVE_ACTIVE__ = true;
-  window.__BWP_PAY_TAG_VERSION__ = "2026-10-14.1";
+  var PAY_URL = "https://www.payroatanselfstorage.com";
+  var ENTRY_API = PAY_URL + "/api/storeganise/reservation";
+  if (window.location.origin !== STORE_ORIGIN || window.__BWP_RESERVATION_PAY_V2__) return;
+  window.__BWP_RESERVATION_PAY_V2__ = true;
   var navigating = false;
 
-  function nativeDestination(link) {
-    var page = new URL(window.location.href);
-    // Check each click: Storeganise can change routes without reloading the page.
-    if (page.origin !== STORE_ORIGIN ||
-      !/^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) ||
-      page.searchParams.get("step") !== "billing") return null;
-
-    // Only use the checkout link actually supplied by Storeganise.
-    // A button label, customer name or price is not a checkout contract.
-    var href = link.getAttribute("data-bwp-original-href") || link.getAttribute("href");
-    if (!href) return null;
-    var target;
-    try { target = new URL(href, STORE_ORIGIN); } catch (error) { return null; }
-    if (target.origin !== STORE_ORIGIN || target.pathname !== CHECKOUT_PATH ||
-      target.username || target.password) return null;
-
-    if (target.searchParams.getAll("orderId").length > 1 ||
-      page.searchParams.getAll("orderId").length > 1) return null;
-    var fromLink = target.searchParams.get("orderId");
-    var fromPage = page.searchParams.get("orderId");
-    if (fromLink && fromPage && fromLink !== fromPage) return null;
-    var orderId = fromLink || fromPage;
-    if (!orderId || !/^[a-f0-9]{24}$/i.test(orderId)) return null;
-    target.searchParams.set("orderId", orderId);
-
-    // Preserve the native siteId and returnUrl, including Storeganise's _n marker.
-    // An empty siteId is valid for a business-level billing configuration.
-    if (target.searchParams.getAll("siteId").length > 1 ||
-      target.searchParams.getAll("returnUrl").length > 1) return null;
-    var siteId = target.searchParams.get("siteId");
-    if (siteId && !/^[a-f0-9]{24}$/i.test(siteId)) return null;
-    var originalReturn = target.searchParams.get("returnUrl");
-    var returnUrl;
-    try { returnUrl = new URL(originalReturn || page.href, STORE_ORIGIN); }
-    catch (error) { return null; }
-    if (returnUrl.origin !== STORE_ORIGIN || returnUrl.username || returnUrl.password ||
-      /^\/(api|admin)(\/|$)/i.test(returnUrl.pathname) ||
-      returnUrl.searchParams.getAll("orderId").length > 1) return null;
-    var returnOrder = returnUrl.searchParams.get("orderId");
-    if (returnOrder && returnOrder !== orderId) return null;
-    // Preserve the order context for the signed webhook, without asserting identity.
-    if (!returnOrder) returnUrl.searchParams.set("orderId", orderId);
-    target.searchParams.set("returnUrl", returnUrl.href);
-    return target.href;
+  function showError(element, message) {
+    var notice = document.getElementById("bwp-reservation-pay-error");
+    if (!notice) {
+      notice = document.createElement("p");
+      notice.id = "bwp-reservation-pay-error";
+      notice.setAttribute("role", "alert");
+      notice.style.cssText = "color:#9f1239;font-size:14px;margin:12px 0;";
+      element.parentNode.insertBefore(notice, element.nextSibling);
+    }
+    notice.textContent = message;
   }
 
-  function continuePayment(event) {
-    if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey ||
-      event.shiftKey || event.altKey) return;
+  function redirectToPay(event) {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     var node = event.target;
     if (node && node.nodeType !== 1) node = node.parentElement;
-    if (!node || typeof node.closest !== "function") return;
-    var link = node.closest("a[href]");
-    if (!link || link.hasAttribute("download") ||
-      (link.target && link.target.toLowerCase() !== "_self") ||
-      link.getAttribute("aria-disabled") === "true" || link.classList.contains("disabled")) return;
-    var destination = nativeDestination(link);
-    if (!destination) return;
+    var element = node && node.closest ? node.closest("a,button") : null;
+    if (!element || element.disabled || element.getAttribute("aria-disabled") === "true") return;
+
+    var page = new URL(window.location.href);
+    var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
+    var original = null;
+    try { if (href) original = new URL(href, STORE_ORIGIN); } catch (ignore) {}
+    var nativeLink = original && original.origin === STORE_ORIGIN &&
+      /^\/api\/v1\/billing\/custom\/?$/.test(original.pathname);
+    var text = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    var bookingBilling = /^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) && page.searchParams.get("step") === "billing";
+    var paymentLabel = /^(añadir un método de pago|agregar un método de pago|add payment method|continuar a métodos de pago|continuar al pago|pagar)$/.test(text);
+    if (!nativeLink && !(bookingBilling && paymentLabel)) return;
+
     event.preventDefault();
     event.stopImmediatePropagation();
     if (navigating) return;
-    navigating = true;
 
-    // Navigate as the native Storeganise anchor does. The browser can follow
-    // HTTP redirects and render the checkout response using its existing session.
-    // The signed webhook creates the Pay URL; no unauthenticated Pay link is built here.
-    window.location.assign(destination);
+    var pageOrder = page.searchParams.get("orderId");
+    var linkOrder = nativeLink ? original.searchParams.get("orderId") : null;
+    var orderId = pageOrder || linkOrder;
+    if (!orderId || !/^[a-f0-9]{24}$/i.test(orderId) ||
+      page.searchParams.getAll("orderId").length > 1 ||
+      (nativeLink && original.searchParams.getAll("orderId").length > 1) ||
+      (pageOrder && linkOrder && pageOrder !== linkOrder)) {
+      showError(element, "Abra el pago desde la reserva de su bodega para identificar qué desea pagar.");
+      return;
+    }
+
+    // Pay verifies the customer and obtains the total from Storeganise.
+    // Do not put API keys, customer details or amounts in this tag.
+    var destination = new URL(ENTRY_API);
+    var returnPage = new URL(page.pathname, STORE_ORIGIN);
+    ["orderId", "date", "step", "lang", "_n"].forEach(function (key) {
+      if (page.searchParams.has(key)) returnPage.searchParams.set(key, page.searchParams.get(key));
+    });
+    returnPage.searchParams.set("orderId", orderId);
+    destination.searchParams.set("orderId", orderId);
+    destination.searchParams.set("returnUrl", returnPage.href);
+    navigating = true;
+    window.location.assign(destination.href);
   }
 
-  // Restore normal behavior when returning through the browser's back/forward cache.
+  window.addEventListener("click", redirectToPay, true);
   window.addEventListener("pageshow", function () { navigating = false; });
-  window.addEventListener("click", continuePayment, true);
 })();
 </script>

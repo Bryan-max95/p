@@ -1,11 +1,11 @@
 import { z } from 'zod';
-import { assertStoreganiseEnabled, StoreganiseIntegrationError } from './config';
+import { StoreganiseIntegrationError } from './config';
 import { storeganiseConfiguration } from './client';
 import { sgId } from './records';
 
 export type StoreganiseSearchParams = Record<string,string|string[]|undefined>;
 export type LegacyStoreganiseEntry =
-  | {kind:'checkout';url:string}
+  | {kind:'reservation';orderId:string;returnUrl:string}
   | {kind:'reservation-required';url:string};
 
 /** Only a navigation hint. It is never proof of the customer's identity. */
@@ -26,21 +26,20 @@ export function matchingOrderId(...values:unknown[]):string|undefined {
   return ids[0];
 }
 
-/** Recover the old GTM link via Storeganise's own authenticated checkout.
- * No customer data is fetched and no Pay session is issued from these URL IDs.
- * Storeganise must identify its logged-in customer and call the signed webhook.
+/** Navigation hints only. Pay authenticates the customer before loading data.
+ * Both the new API entry and older direct GTM links open the reservation flow.
  */
 export function legacyStoreganiseEntry(params:StoreganiseSearchParams):LegacyStoreganiseEntry|undefined {
-  if(params.source!=='storeganise')return;
+  if(params.source!=='storeganise' && params.reservation===undefined)return;
   if(params.session!==undefined){
     if(typeof params.session==='string'&&/^[A-Za-z0-9_-]{43}$/.test(params.session))return;
     throw new StoreganiseIntegrationError('INVALID_TOKEN',400);
   }
-  const input=z.object({orderId:sgId.optional(),siteId:sgId.optional(),
+  const input=z.object({orderId:sgId.optional(),reservation:sgId.optional(),siteId:sgId.optional(),
     returnUrl:z.string().optional(),portalUrl:z.string().optional()}).parse(params);
   const original=storeganiseBookingReturn(input.returnUrl);
   const portal=storeganiseBookingReturn(input.portalUrl);
-  const orderId=matchingOrderId(input.orderId,original?.searchParams.get('orderId'),portal?.searchParams.get('orderId'));
+  const orderId=matchingOrderId(input.reservation,input.orderId,original?.searchParams.get('orderId'),portal?.searchParams.get('orderId'));
   if(!orderId){
     // The old GTM tag also redirected the profile's Add payment method button.
     // It carries no payable reservation. Offer navigation, never an anonymous
@@ -49,10 +48,6 @@ export function legacyStoreganiseEntry(params:StoreganiseSearchParams):LegacySto
     if(profile)return {kind:'reservation-required',url:new URL('/account/units',profile.origin).href};
     throw new StoreganiseIntegrationError('STOREGANISE_ORDER_REQUIRED',400);
   }
-  const {url}=assertStoreganiseEnabled();
-  const destination=new URL('/api/v1/billing/custom',url.origin);
-  destination.searchParams.set('orderId',orderId);
-  if(input.siteId)destination.searchParams.set('siteId',input.siteId);
-  destination.searchParams.set('returnUrl',(original??portal??new URL('/',url.origin)).href);
-  return {kind:'checkout',url:destination.href};
+  const {url}=storeganiseConfiguration();
+  return {kind:'reservation',orderId,returnUrl:(original??portal??new URL('/account/units',url.origin)).href};
 }

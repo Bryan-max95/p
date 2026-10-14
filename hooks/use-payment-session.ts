@@ -43,6 +43,7 @@ export interface PaymentSession {
   authenticationPending?: boolean;
   billingRequired?: boolean;
   billingDetails?: BillTo;
+  requiresReservationConfirmation?: boolean;
   storeganise?: { status: string; paymentId?: string; returnUrl: string };
 }
 
@@ -219,7 +220,9 @@ export function usePaymentSession(manualSandboxEnabled = false) {
     } catch (failure) {
       if (failure instanceof PaymentRequestError && ['INVALID_PAYMENT_DATA', 'CARD_EXPIRED', 'BILLING_DETAILS_REQUIRED',
         'INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE','STOREGANISE_CHECKOUT_UNAVAILABLE',
-        'STOREGANISE_PAY_DISABLED','STOREGANISE_SANDBOX_INSTANCE_REQUIRED','STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH'].includes(failure.code)) {
+        'STOREGANISE_PAY_DISABLED','STOREGANISE_SANDBOX_INSTANCE_REQUIRED','STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH',
+        'STOREGANISE_CUSTOMER_LOGIN_REQUIRED','STOREGANISE_RESERVATION_PENDING','STOREGANISE_RESERVATION_REFRESH_REQUIRED',
+        'STOREGANISE_RESERVATION_CONFIRMATION_REQUIRED','STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED','STOREGANISE_IDENTITY_MISMATCH'].includes(failure.code)) {
         setRequestError(failure.code); setUncertain(false); return;
       }
       // The request may have reached the processor. Consult durable server state,

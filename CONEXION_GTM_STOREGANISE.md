@@ -1,57 +1,51 @@
-# Conectar la etiqueta de Google Tag Manager con Pay
+# Storeganise → Pay por reserva
 
-Actualización: 14 de octubre de 2026. Revisión del código y consultas de lectura; no se ejecutaron el proyecto, pruebas, compilación ni cobros. No se publicaron etiquetas ni se cambiaron ajustes remotos desde esta revisión.
+Actualización: 14 de octubre de 2026. Código implementado y revisado por lectura. No se ejecutaron pruebas, compilación, servidor ni cobros. La conexión desplegada no se ha validado.
 
-## Corrección del mensaje junto al botón
+## Etiqueta que debe publicarse
 
-Se comprobó que el contenedor público GTM-N5GX4DLN ya entrega la versión 2026-10-13.3. El archivo aportado por el comercio coincide con esa versión. El mensaje “No se pudo abrir el pago de su reserva” proviene de su función errorMessage: agrupa errores HTTP, de red, de formato y de preparación de sesión. El texto por sí solo no identifica cuál de ellos ocurrió.
+Reemplazar completamente la etiqueta HTML de pago anterior por [examples/gtm-storeganise-pago.html](examples/gtm-storeganise-pago.html). Mantener una sola etiqueta de pago y el activador All Pages. Publicar en Google Tag Manager y recargar la página de Storeganise para quitar los listeners de la versión anterior.
 
-Esa versión sustituye la navegación por fetch con redirect: "error", descarga el contenido y trata de extraer un enlace de Pay. Rechaza las redirecciones HTTP y depende de que la respuesta sea JSON o HTML con una forma específica. Eso añade restricciones que no tiene el enlace nativo del portal. No se capturó la respuesta HTTP del intento del comercio, por lo que no se afirma que haya sido una redirección el desencadenante concreto.
+La etiqueta contiene estos destinos fijos:
 
-La nueva versión 2026-10-14.1 elimina esa petición y ese analizador. Utiliza el enlace /api/v1/billing/custom que Storeganise ya genera en su componente de facturación y navega con window.location.assign. El navegador conserva su sesión y sigue las respuestas y redirecciones normales. No sustituye botones basándose en su texto ni fabrica un endpoint si el botón no tiene un enlace nativo.
+    PAY_URL = https://www.payroatanselfstorage.com
+    ENTRY_API = https://www.payroatanselfstorage.com/api/storeganise/reservation
 
-El componente público de la aplicación de clientes revisado genera un ancla hacia ese endpoint, con orderId, siteId y returnUrl. Esta corrección sigue ese comportamiento de la aplicación alojada; no sustituye la autenticación Bearer documentada para aplicaciones de reserva externas.
+Al pulsar el enlace de pago de una reserva, navega a la API de Pay con orderId y returnUrl. Esa API redirige a la página de Pay. Ya no navega a /api/v1/billing/custom de Storeganise. No extrae precios del HTML ni transmite nombres, correos, contraseñas, claves API o tarjetas en la URL.
 
-La etiqueta actúa solo en /sites/{sitio}/{tipo}?step=billing. Conserva el sitio y los parámetros de regreso, incluido _n, comprueba que los IDs de orden coincidan y permite un siteId vacío para una configuración de facturación global. No interviene en el registro, el perfil /account/billing ni la administración. Al volver con el botón Atrás se restablece la protección contra doble clic.
+Debe existir un orderId de 24 caracteres hexadecimales en el enlace nativo o en la página. Si hay dos IDs distintos, la etiqueta detiene la navegación. El botón de añadir tarjeta de un perfil sin reserva no permite saber qué reserva desea pagar el cliente: el cliente debe iniciar el pago desde su reserva. No se elige automáticamente la última reserva.
 
-## Dónde colocar la etiqueta
+## Identificación del cliente
 
-1. Abrir Google Tag Manager, contenedor GTM-N5GX4DLN.
-2. Ir a Etiquetas → payroatanselfstorage → HTML personalizado.
-3. Sustituir el contenido completo por [examples/gtm-storeganise-pago.html](examples/gtm-storeganise-pago.html), incluidas las etiquetas script. Mantener una sola etiqueta de pago y el activador All Pages.
-4. Guardar → Enviar → Publicar y crear versión. Recargar Storeganise completamente para retirar el listener anterior. No basta con guardar o subir el archivo a GitHub.
+Las cookies del portal Storeganise no se transfieren a otro dominio. Esta versión añade una confirmación de acceso en Pay con el correo y contraseña de la cuenta de Storeganise. No es un acceso transparente: la primera vez, o al vencer la sesión de 30 minutos, el cliente verá ese formulario antes del carrusel.
 
-El marcador __BWP_PAY_TAG_VERSION__ de esta revisión vale 2026-10-14.1. Su guardia es __BWP_PAY_NATIVE_ACTIVE__. No incluye fetch, DOMParser ni el mensaje genérico citado arriba.
+Pay envía esas credenciales únicamente al endpoint de autenticación de la instancia configurada. La contraseña no se guarda. El token de cliente queda cifrado en una cookie HttpOnly, Secure y SameSite=Strict de Pay; no se devuelve a JavaScript ni se pone en la URL. El inicio de sesión tiene límites persistentes por dirección y cuenta. Esto requiere que la cuenta permita el acceso por contraseña documentado por Storeganise; no implementa OAuth/SSO, CAPTCHA o verificación OTP adicional. Para eliminar esta confirmación se necesita un handoff autenticado soportado por Storeganise; una redirección por GTM no lo sustituye.
 
-## Cómo se llega al dominio de Pay
+POST /api/storeganise/reservation acepta solamente orderId y returnUrl desde el mismo origen de Pay. Usa el token del cliente para consultar /api/v1/user y /api/v1/units/orders/{orderId}?include=invoicePreview, y verifica el propietario mediante /api/v1/admin/jobs/{orderId}. El nombre y los datos de facturación se consultan en Storeganise. Se obtiene el total de invoicePreview.total, no el precio anunciado del tipo de bodega ni un valor enviado por el navegador.
 
-La navegación pasa primero por Storeganise para que identifique a su cliente. El receptor firmado de Pay comprueba la relación cliente/orden/factura/bodega y crea la sesión. Su HTML contiene la redirección y un enlace de continuación a la URL privada del carrusel. El destino se configura en el servidor:
+## Carrusel sin factura previa
 
-    PAY_PUBLIC_URL=https://www.payroatanselfstorage.com
+Para abrir el carrusel no hace falta una factura fiscal ni una factura interna ya creada. Pay crea una sesión por reserva con su cliente, selección de bodega, total USD y conversión BCH a HNL. Si la bodega concreta aún no está asignada, muestra el tipo reservado sin afirmar que ya está ocupado.
 
-El navegador termina en https://www.payroatanselfstorage.com/?session=… cuando el receptor emite correctamente la sesión. Poner directamente la portada de Pay en el botón no identifica al cliente ni establece su saldo. Esta etiqueta no transporta claves, tarjetas, precios o datos personales y no crea cobros.
+El cliente revisa el total y pulsa Confirmar reserva y pagar. Antes de autorizar la tarjeta, Pay vuelve a consultar la reserva, verifica el total y solicita submitNow mediante la API del propio cliente, como hace la revisión final del portal. No omite firmas ni requisitos mediante la API administrativa. Un intento de envío queda registrado antes de hacerlo, para que una respuesta perdida no cause envíos repetidos.
 
-Los enlaces antiguos que llegan a Pay con source=storeganise y una orden se remiten al checkout autenticado de Storeganise. Un enlace antiguo desde /account/billing sin orden ofrece volver a las reservas. No se crea una sesión a partir de IDs anónimos.
+Para cobrar y registrar el dinero, Storeganise debe haber confirmado la entrada y creado su factura interna cobrable. Esa factura es su registro contable, no la factura fiscal del portal. Si todavía falta confirmación, asignación, firma o emisión interna, el cliente ve el motivo y no se inicia un cobro. Las automatizaciones de Storeganise deben completar esos pasos para que el recorrido sea continuo. Si el total cambia, debe abrir nuevamente el pago y revisar el nuevo total.
 
-## Requisitos del receptor
+La sesión por reserva se convierte en sesión vinculada a esa misma factura; no se crea un segundo cobro. Los bloqueos y la referencia por reserva/factura evitan duplicados entre aperturas y webhooks. Se conserva la conversión fijada mientras la sesión esté vigente.
 
-- URL del webhook: https://www.payroatanselfstorage.com/api/storeganise/billing.
-- STOREGANISE_API_KEY y el STOREGANISE_WEBHOOK_SECRET real de la cuenta deben estar en Vercel, entorno Production. Un cambio de variables requiere un nuevo despliegue.
-- STOREGANISE_PAY_ENABLED=true habilita la integración. CyberSource sandbox requiere una instancia aislada .storeganise.dev; producción usa la instancia real .storeganise.com. Esta revisión no cambia esos entornos.
-- El 401 de una entrega anterior indica un rechazo de autenticación del receptor. La nueva etiqueta no corrige un secreto incorrecto. Un GET de salud con 200 tampoco verifica la firma de un POST.
+## Después del pago
 
-## Condición pendiente en las reservas sin factura interna
+El procesamiento existente confirma la transacción CyberSource, registra el pago externo con método card en Storeganise y comprueba el saldo. Solo informa bodega activa cuando Storeganise devuelve occupied para el mismo cliente y alquiler. La factura fiscal sigue perteneciendo al portal y su conexión existente con Storeganise.
 
-En la consulta de lectura del 14 de octubre se confirmó billing=custom-billing, billingTrigger=manual, moneda USD y un método externo card configurado. La lista de trabajos incluye una reserva reciente con orderState=notSubmitted, paso await_submitOrder y sin invoiceId. Esto demuestra que hay órdenes en el paso previo a la factura; no demuestra por sí solo que esa sea la petición que produjo el mensaje del navegador.
+billing.list continúa sin tarjetas guardadas y billing.charge no hace cargos recurrentes. Esta etiqueta implementa un pago puntual por reserva; no registra un método reutilizable en Storeganise. La automatización no debe intentar otro cobro bancario por billing.charge: la recaudación se realiza en Pay y después se registra como pago externo en Storeganise.
 
-El checkout de Pay cobra una factura interna de Storeganise creada, emitida y con saldo. Cuando todavía no existe, responde ORDER_REQUIRES_CONFIRMED_INVOICE. El registro de un método de pago nativo puede ocurrir antes de confirmar la reserva. La etiqueta no cambia ese orden del proceso y no convierte un presupuesto en un saldo cobrable.
+## Despliegue
 
-Para el flujo actual de cobro único, la reserva debe confirmarse y crear la factura antes de abrir el checkout. Se necesita una personalización compatible de Storeganise que envíe userId e invoiceId firmados a Pay en ese punto; ver [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md). La otra arquitectura, guardar tarjetas en el paso nativo y cobrar después, exige tokenización reutilizable y un proveedor completo de billing.list / billing.charge, que este proyecto no implementa. No se devuelven tarjetas ficticias ni se confirma una orden sin la acción correspondiente del cliente.
+1. Desplegar el código actualizado en Vercel antes de publicar la etiqueta.
+2. Usar PAY_PUBLIC_URL=https://www.payroatanselfstorage.com, DATABASE_URL y PAY_SESSION_TOKEN_SECRET privado de al menos 32 caracteres. El esquema agrega la tabla de límites y el indicador de envío de reserva al inicializarse; no se ha ejecutado una migración desde esta revisión.
+3. Activar STOREGANISE_PAY_ENABLED=true y configurar API URL, API key, secreto real del webhook, BCH y CyberSource según [.env.example](.env.example). No pegar secretos en GTM.
+4. Mantener entornos compatibles: producción con Storeganise .com; sandbox bancario solo con instancia Storeganise .dev y clientes de prueba autorizados. Esta revisión no cambió el entorno bancario ni las credenciales.
+5. Configurar permisos para leer las entidades, registrar pagos y, si está habilitado, completar únicamente el paso de factura pagada. Revisar automatizaciones de confirmación/emisión/ocupación en Storeganise. Ver [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md).
+6. Publicar la etiqueta y recargar Storeganise. Cuando se autoricen pruebas, verificar autenticación, total, confirmación de orden, cobro y activación. El código nuevo no acredita por sí solo el comportamiento de la cuenta externa.
 
-La factura fiscal del portal es distinta: se emite después del pago mediante la integración Storeganise → portal que administra el comercio. Pay no llama directamente al portal ni exige una factura fiscal previa.
-
-## Después del cobro
-
-Pay muestra el importe de referencia en USD y cobra en HNL con la tasa BCH fijada para la sesión. Tras confirmar el cobro bancario, registra el pago externo por tarjeta contra la misma factura interna y conserva la referencia única de CyberSource. La bodega se muestra activa únicamente cuando Storeganise confirma su ocupación por ese cliente. Los webhooks de seguimiento despiertan la conciliación, pero no sustituyen la sesión de entrada al carrusel.
-
-Referencias: [checkout de métodos de pago](https://help.storeganise.com/article/471-add-payment-methods-custom-booking-app), [gestión de entradas](https://help.storeganise.com/article/159-jobs-move-ins), [firmas de webhooks](https://help.storeganise.com/article/19-webhooks) y [publicación de Google Tag Manager](https://support.google.com/tagmanager/answer/6107163?hl=es).
+Referencias oficiales: [autenticación en integraciones personalizadas](https://help.storeganise.com/article/305-custom-stripe-integration), [gestión de entradas y automatización](https://help.storeganise.com/article/159-jobs-move-ins). Las operaciones de reservas se contrastaron por lectura con el cliente público de Storeganise; el contrato completo de /api/docs de la cuenta sigue sin estar accesible con la clave disponible.

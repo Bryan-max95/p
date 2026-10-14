@@ -1,6 +1,6 @@
 import PaymentCarousel from './components/payment-carousel';
 import { sandboxManualEnabled } from '@/lib/pay/sandbox-manual';
-import { redirect } from 'next/navigation';
+import ReservationAccess from './components/reservation-access';
 import { legacyStoreganiseEntry, type LegacyStoreganiseEntry, type StoreganiseSearchParams } from '@/lib/storeganise/browser-entry';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +27,6 @@ export default async function PaymentPage({searchParams}:{searchParams:Promise<S
       <a href={entry.url} rel="noreferrer" className="inline-flex rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-700">Volver a mis reservas / Return to my bookings</a>
     </section>
   </main>;
-  if(entry?.kind==='checkout')redirect(entry.url);
+  if(entry?.kind==='reservation')return <ReservationAccess key={entry.orderId} orderId={entry.orderId} returnUrl={entry.returnUrl} />;
   return <PaymentCarousel manualSandboxEnabled={sandboxManualEnabled()} />;
 }

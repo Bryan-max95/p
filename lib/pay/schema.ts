@@ -66,6 +66,7 @@ ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS storeganise_context jsonb;
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS storeganise_status text NOT NULL DEFAULT 'disabled';
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS storeganise_payment_id text;
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS storeganise_error text;
+ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS storeganise_submit_started boolean NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS storeganise_deliveries (
   session_id uuid PRIMARY KEY REFERENCES pay_sessions(id),
   transaction_id text UNIQUE NOT NULL, status text NOT NULL DEFAULT 'pending',
@@ -80,4 +81,8 @@ CREATE TABLE IF NOT EXISTS pay_launch_links (
   expires_at timestamptz NOT NULL, consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS pay_launch_session ON pay_launch_links(session_id);
+CREATE TABLE IF NOT EXISTS pay_customer_login_limits (
+  key_hash text PRIMARY KEY, attempts integer NOT NULL, expires_at timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS pay_customer_login_expiry ON pay_customer_login_limits(expires_at);
 `;

@@ -43,7 +43,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
     const stored = await query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1', [sessionId]);
     const session = stored.rows[0];
     const binding = session.storeganise_context;
-    if (!binding || binding.apiOrigin !== url.origin || session.environment !== environment ||
+    if (!binding || !binding.invoiceId || !binding.rentalId || binding.kind === 'reservation' || binding.apiOrigin !== url.origin || session.environment !== environment ||
       binding.customerId !== session.customer_id || binding.invoiceId !== session.invoice_id ||
       binding.unitId !== session.unit_id || !session.reference_usd_amount || !session.paid_at) {
       throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');

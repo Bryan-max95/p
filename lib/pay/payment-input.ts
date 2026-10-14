@@ -9,6 +9,7 @@ export const paymentRequestSchema = z.object({
   expirationMonth: z.string().regex(/^(0[1-9]|1[0-2])$/),
   expirationYear: z.string().regex(/^20\d{2}$/),
   billingDetails: billToSchema.optional(),
+  confirmReservation: z.boolean().optional(),
   browser: z.object({ language: z.string().max(30), colorDepth: z.number().int().min(1).max(64),
     height: z.number().int().min(1).max(20000), width: z.number().int().min(1).max(20000),
     timezoneOffset: z.number().int().min(-1440).max(1440) }).strict(),

@@ -2,8 +2,11 @@ import type { BillTo } from '@/lib/cybersource/types';
 import type { GatewayEnvironment } from '@/lib/cybersource/environment';
 
 export interface StoreganiseContext {
-  apiOrigin: string; customerId: string; invoiceId: string; rentalId: string;
+  kind?: 'invoice' | 'reservation';
+  apiOrigin: string; customerId: string; invoiceId?: string; rentalId?: string;
   unitId: string; siteId: string; jobId?: string;
+  unitTypeId?: string;
+  selectedUnitId?: string;
 }
 
 export interface CheckoutSessionInput {

@@ -244,7 +244,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
     const [month,year]=expDate.split('/');if(!fieldsReady||!month||!year||!cardHolder.trim()||!payment.canPay||tokenizingRef.current)return;
     tokenizingRef.current=true;setTokenizing(true);setCardError(null);
     try{const transientToken=await secureFields.current?.tokenize(month,`20${year}`);if(!transientToken)return;
-      await payment.pay({transientToken,cardHolder,expirationMonth:month,expirationYear:`20${year}`,...(billingDetails?{billingDetails}:{}),browser:{language:navigator.language,colorDepth:screen.colorDepth,height:screen.height,width:screen.width,timezoneOffset:new Date().getTimezoneOffset()}});
+      await payment.pay({transientToken,cardHolder,expirationMonth:month,expirationYear:`20${year}`,...(billingDetails?{billingDetails}:{}),...(payment.session.requiresReservationConfirmation?{confirmReservation:true}:{}),browser:{language:navigator.language,colorDepth:screen.colorDepth,height:screen.height,width:screen.width,timezoneOffset:new Date().getTimezoneOffset()}});
     }catch{setCardError('CARD_DETAILS_INVALID');}finally{tokenizingRef.current=false;setTokenizing(false);}
   };
 
@@ -843,6 +843,10 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                   </div>
 
                   {priceReference && <p className="text-xs leading-relaxed text-slate-600" data-testid="charge-disclosure">{exchangeNotice} {rateSource}</p>}
+                  {payment.session?.requiresReservationConfirmation && <p className="text-xs leading-relaxed text-slate-600">
+                    {lang==='es'?'Al continuar confirma la reserva y autoriza el pago del total mostrado.':'Continuing confirms your booking and authorizes payment of the displayed total.'}{' '}
+                    <a href={payment.session.storeganise?.returnUrl} rel="noreferrer" className="font-semibold underline">{lang==='es'?'Revisar mi reserva en Storeganise':'Review my Storeganise booking'}</a>
+                  </p>}
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-2 gap-3">
                     <button
                       type="button"
@@ -867,7 +871,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                       ) : (
                         <>
                           <Lock className="w-4 h-4" />
-                          <span>{payment.requiresReview ? (lang==='es'?'Pago pendiente de verificar':'Payment requires verification') : `${t.btnPayNow} • ${displayLabel}`}</span>
+                          <span>{payment.requiresReview ? (lang==='es'?'Pago pendiente de verificar':'Payment requires verification') : `${payment.session?.requiresReservationConfirmation ? (lang==='es'?'Confirmar reserva y pagar':'Confirm booking and pay') : t.btnPayNow} • ${displayLabel}`}</span>
                         </>
                       )}
                     </button>

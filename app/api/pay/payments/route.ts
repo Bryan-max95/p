@@ -22,16 +22,19 @@ export async function POST(req: NextRequest) {
     const body = paymentRequestSchema.safeParse(await req.json());
     if (!body.success || !session.capture_context) return NextResponse.json({ error: 'INVALID_PAYMENT_DATA' }, { status: 400 });
     const data = body.data;
+    if (session.storeganise_context?.kind === 'reservation' && data.confirmReservation !== true) {
+      return NextResponse.json({error:'STOREGANISE_RESERVATION_CONFIRMATION_REQUIRED'},{status:400});
+    }
     if (session.storeganise_context && !billToSchema.safeParse(data.billingDetails ?? session.bill_to).success) {
       return NextResponse.json({error:'BILLING_DETAILS_REQUIRED'},{status:400});
     }
-    await verifyStoreganiseCheckout(session);
     if (new Date(Number(data.expirationYear), Number(data.expirationMonth), 1).getTime() <= Date.now()) {
       return NextResponse.json({ error: 'CARD_EXPIRED' }, { status: 400 });
     }
     const gateway = new CyberSourceGateway(session.environment);
     const token = await gateway.verifyTransientToken(data.transientToken, session.capture_context);
-    const attempt = await beginAttempt(session.id, token.tokenId, 'payment', data.billingDetails);
+    await verifyStoreganiseCheckout(session);
+    const attempt = await beginAttempt(session.id, token.tokenId, 'payment', data.billingDetails, session);
     attemptId = attempt.id;
     const setup = await gateway.setupAuthentication(token, attempt.reference);
     const updated = await finishAttempt(attempt.id, { status: 'pending', gatewayStatus: 'DEVICE_COLLECTION_REQUIRED', brand: token.brand, last4: token.last4,

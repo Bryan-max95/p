@@ -8,7 +8,17 @@
   var CHECKOUT_PATH = "/api/v1/billing/custom";
   if (window.location.origin !== STORE_ORIGIN || window.__BWP_PAY_SESSION_ACTIVE__) return;
   window.__BWP_PAY_SESSION_ACTIVE__ = true;
+  window.__BWP_PAY_TAG_VERSION__ = "2026-10-13.3";
   var preparing = false;
+
+  function isBookingPaymentPage() {
+    // Storeganise changes routes without reloading. Check the current route on
+    // every click, not only when this All Pages tag first loads.
+    var page = new URL(window.location.href);
+    return page.origin === STORE_ORIGIN &&
+      /^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) &&
+      page.searchParams.get("step") === "billing";
+  }
 
   function nativeLink(element) {
     var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
@@ -29,6 +39,7 @@
   }
 
   function checkoutDestination(element) {
+    if (!isBookingPaymentPage()) throw new Error("RESERVATION_CHANGED");
     var page = new URL(window.location.href);
     var target = nativeLink(element) || new URL(CHECKOUT_PATH, STORE_ORIGIN);
     var fromLink = target.searchParams.get("orderId");
@@ -137,6 +148,7 @@
   function preparePayment(element) {
     if (preparing) return;
     preparing = true;
+    var initiatingPage = window.location.href;
     var priorBusy = element.getAttribute("aria-busy");
     element.setAttribute("aria-busy", "true");
     showStatus(element, "Preparando el pago de su reserva…", false);
@@ -180,17 +192,22 @@
     Promise.resolve().then(function () {
       return requestCheckout(checkoutDestination(element));
     }).then(function (destination) {
+      // Do not pull the customer back into checkout after a route change.
+      if (window.location.href !== initiatingPage) { finish(); return; }
       // This is the redirect to https://www.payroatanselfstorage.com/ with its session.
       window.location.assign(destination);
       window.clearTimeout(timeout);
       // Keep the in-flight guard until navigation finishes to prevent double clicks.
     }).catch(function (error) {
       finish();
-      showStatus(element, errorMessage(error && error.message), true);
+      if (window.location.href === initiatingPage) showStatus(element, errorMessage(error && error.message), true);
     });
   }
 
   function continuePayment(event) {
+    // Adding a saved card in /account/billing is not a reservation payment.
+    // Leave profile, registration and administration controls to Storeganise.
+    if (!isBookingPaymentPage()) return;
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     var node = event.target;
     if (node && node.nodeType !== 1) node = node.parentElement;

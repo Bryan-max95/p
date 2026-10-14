@@ -4,6 +4,9 @@ import { storeganiseConfiguration } from './client';
 import { sgId } from './records';
 
 export type StoreganiseSearchParams = Record<string,string|string[]|undefined>;
+export type LegacyStoreganiseEntry =
+  | {kind:'checkout';url:string}
+  | {kind:'reservation-required';url:string};
 
 /** Only a navigation hint. It is never proof of the customer's identity. */
 export function storeganiseBookingReturn(value:unknown):URL|undefined {
@@ -27,22 +30,29 @@ export function matchingOrderId(...values:unknown[]):string|undefined {
  * No customer data is fetched and no Pay session is issued from these URL IDs.
  * Storeganise must identify its logged-in customer and call the signed webhook.
  */
-export function legacyStoreganiseDestination(params:StoreganiseSearchParams):string|undefined {
+export function legacyStoreganiseEntry(params:StoreganiseSearchParams):LegacyStoreganiseEntry|undefined {
   if(params.source!=='storeganise')return;
   if(params.session!==undefined){
     if(typeof params.session==='string'&&/^[A-Za-z0-9_-]{43}$/.test(params.session))return;
     throw new StoreganiseIntegrationError('INVALID_TOKEN',400);
   }
-  const {url}=assertStoreganiseEnabled();
   const input=z.object({orderId:sgId.optional(),siteId:sgId.optional(),
     returnUrl:z.string().optional(),portalUrl:z.string().optional()}).parse(params);
   const original=storeganiseBookingReturn(input.returnUrl);
   const portal=storeganiseBookingReturn(input.portalUrl);
   const orderId=matchingOrderId(input.orderId,original?.searchParams.get('orderId'),portal?.searchParams.get('orderId'));
-  if(!orderId)throw new StoreganiseIntegrationError('STOREGANISE_ORDER_REQUIRED',400);
+  if(!orderId){
+    // The old GTM tag also redirected the profile's Add payment method button.
+    // It carries no payable reservation. Offer navigation, never an anonymous
+    // checkout or a redirect back to the same billing button.
+    const profile=[original,portal].find(target=>target&&/^\/account\/billing\/?$/.test(target.pathname));
+    if(profile)return {kind:'reservation-required',url:new URL('/account/units',profile.origin).href};
+    throw new StoreganiseIntegrationError('STOREGANISE_ORDER_REQUIRED',400);
+  }
+  const {url}=assertStoreganiseEnabled();
   const destination=new URL('/api/v1/billing/custom',url.origin);
   destination.searchParams.set('orderId',orderId);
   if(input.siteId)destination.searchParams.set('siteId',input.siteId);
   destination.searchParams.set('returnUrl',(original??portal??new URL('/',url.origin)).href);
-  return destination.href;
+  return {kind:'checkout',url:destination.href};
 }

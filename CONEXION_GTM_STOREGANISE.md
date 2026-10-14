@@ -2,6 +2,18 @@
 
 Actualización: 14 de octubre de 2026. Revisión por lectura de código. No se ejecutaron servidor, compilación, pruebas ni cobros. La integración desplegada no está validada.
 
+## Corrección de la etiqueta V4
+
+La etiqueta anterior podía mostrar el contenido sin diseño al pie de Storeganise: su política CSP exige un nonce específico para estilos. V4 toma el valor de `#app[data-style-nonce]` de la página actual y lo aplica al estilo antes de insertarlo. No usa el nonce de los scripts ni valores fijos. Se eliminaron los estilos en atributos HTML.
+
+También conserva `orderId` en la solicitud nativa de checkout, además del retorno, y admite direcciones relativas de la página alojada de Storeganise. El destino final sigue siendo exclusivamente `https://www.payroatanselfstorage.com/?session=...`, con la sesión emitida por el servidor. No basta con llevar al cliente a la raíz de Pay sin una sesión autenticada.
+
+Se reemplazó el error genérico por un código de soporte sin datos personales ni tokens. Esto permite distinguir el fallo de lectura de la reserva (`ORDER_HTTP_...`), el del checkout (`CHECKOUT_HTTP_...`), el de su página alojada (`HOSTED_HTTP_...`) y una respuesta sin enlace válido (`INVALID_CHECKOUT_RESPONSE`). No debe interpretarse automáticamente un 403, 404 o 409 como falta de integración: hay que revisar la respuesta de esa etapa.
+
+Para usar V4, reemplazar **todo** el contenido de la etiqueta en Google Tag Manager con [el archivo completo](examples/gtm-storeganise-pago.html), publicar esa versión y recargar la página de Storeganise. Mantener una sola etiqueta de pagos. GitHub/Vercel no actualizan por sí solos Google Tag Manager.
+
+Esta corrección se limita a la etiqueta y esta guía. No cambia la conexión de CyberSource, credenciales, configuración de entornos ni controles del servidor. No se confirmó aún una respuesta de checkout válida con la sesión de un cliente; por eso no se afirma que el recorrido completo ya funcione. Si falla, comunicar únicamente el código `V4 / ...` mostrado, sin enviar cookies, contraseñas ni enlaces con tokens.
+
 ## Qué incluye esta versión
 
 - Se retiró de Pay el formulario de correo y contraseña.
@@ -12,7 +24,7 @@ Actualización: 14 de octubre de 2026. Revisión por lectura de código. No se e
 
 ## Dependencia externa pendiente: no basta con desplegar
 
-La integración de facturación personalizada de Storeganise debe estar instalada y configurada para emitir el handoff firmado y devolver al navegador el enlace de Pay. La ruta nativa mostró 404 anteriormente. No tenemos evidencia de que ya esté habilitada; esta actualización no cambia la configuración de la cuenta Storeganise.
+La integración de facturación personalizada de Storeganise debe estar configurada para emitir el handoff firmado y devolver al navegador el enlace de Pay. La configuración leída de la cuenta indica `billing: custom-billing`; eso no confirma que el checkout concreto esté devolviendo el enlace. La ruta nativa mostró 404 anteriormente, pero falta la respuesta autenticada actual para identificar la causa. Esta actualización no cambia la configuración de la cuenta Storeganise.
 
 Además, su recorrido debe admitir un pago externo puntual y confirmar la reserva antes del cobro. El botón nativo de añadir tarjeta corresponde al registro de un método de pago; Pay no simula una tarjeta guardada. Si la orden permanece en notSubmitted o faltan firmas, la apertura del carrusel no confirma esa orden.
 

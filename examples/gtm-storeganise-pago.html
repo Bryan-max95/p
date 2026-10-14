@@ -7,12 +7,37 @@
   var STORE_ORIGIN = "https://roatanselfstorage.storeganise.com";
   var PAY_URL = "https://www.payroatanselfstorage.com";
   var CHECKOUT_PATH = "/api/v1/billing/custom";
-  if (window.location.origin !== STORE_ORIGIN || window.__BWP_SIGNED_PAY_V4__) return;
-  window.__BWP_SIGNED_PAY_V4__ = true;
+  if (window.location.origin !== STORE_ORIGIN || window.__BWP_SIGNED_PAY_V5__) return;
+  window.__BWP_SIGNED_PAY_V5__ = true;
   var busy = false;
   var attempt = 0;
+  var activeRequest;
+  var pauseUntil = 0;
+  var pauseKey = "bwp-pay-checkout-pause-v1";
   var focusedElement;
   var overlay;
+
+  function remainingPause() {
+    try {
+      var saved = Number(window.sessionStorage.getItem(pauseKey));
+      if (isFinite(saved) && saved > pauseUntil) pauseUntil = saved;
+    } catch (ignore) {}
+    return Math.max(0, pauseUntil - Date.now());
+  }
+
+  function pauseCheckout(milliseconds) {
+    pauseUntil = Math.max(pauseUntil, Date.now() + milliseconds);
+    // A timestamp only: never persist customer details or checkout tokens here.
+    try { window.sessionStorage.setItem(pauseKey, String(pauseUntil)); } catch (ignore) {}
+  }
+
+  function rateLimitPause(response) {
+    var value = response.headers.get("Retry-After");
+    var milliseconds = value && /^\d+$/.test(value.trim()) ? Number(value) * 1000 : Date.parse(value || "") - Date.now();
+    // If no usable duration is given, slow down our own checkout requests.
+    // This does not mean Storeganise's server-side limit resets in one minute.
+    pauseCheckout(isFinite(milliseconds) && milliseconds > 0 ? Math.max(milliseconds, 1000) : 60000);
+  }
 
   function setLoading() {
     if (overlay) overlay.remove();
@@ -65,7 +90,7 @@
   }
 
   function safeCode(code) {
-    var known = ["RESERVATION_REQUIRED", "INVALID_NATIVE_URL", "INVALID_CHECKOUT_RESPONSE", "STOREGANISE_UNAVAILABLE",
+    var known = ["RESERVATION_REQUIRED", "INVALID_NATIVE_URL", "INVALID_CHECKOUT_RESPONSE", "STOREGANISE_UNAVAILABLE", "CHECKOUT_PAUSED",
       "STOREGANISE_PAY_DISABLED", "STOREGANISE_SANDBOX_INSTANCE_REQUIRED", "STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH",
       "INVALID_WEBHOOK_SIGNATURE", "INVALID_STOREGANISE_DATA", "STOREGANISE_RESERVATION_PENDING"];
     if (known.indexOf(code) !== -1 || /^(ORDER|CHECKOUT|HOSTED)_(HTTP_[1-5][0-9]{2}|NETWORK|TIMEOUT|INVALID_RESPONSE)$/.test(code || "")) return code;
@@ -86,13 +111,15 @@
     code = safeCode(code);
     var text = "No pudimos conectar tu reserva con Pay. Vuelve a intentarlo o comunica el código de soporte a Roatan Self Storage. No se inició ningún cobro.";
     if (/^(ORDER|CHECKOUT|HOSTED)_HTTP_401$/.test(code)) text = "Storeganise no pudo verificar tu sesión. Vuelve a iniciar sesión en Storeganise para continuar. No se inició ningún cobro.";
+    var paused = code === "CHECKOUT_PAUSED" || /_HTTP_429$/.test(code);
+    if (paused) text = "La apertura de Pay está en pausa para evitar solicitudes repetidas. Podrás volver a intentarlo a partir de " + new Date(Date.now() + remainingPause()).toLocaleString() + ". Si Storeganise mantiene el límite, será necesario esperar el plazo indicado por su soporte. No se inició ningún cobro.";
     if (!overlay) setLoading();
-    overlay.querySelector("#bwp-pay-loading-title").textContent = "Tu reserva sigue en Storeganise";
+    overlay.querySelector("#bwp-pay-loading-title").textContent = paused ? "Espera antes de continuar" : "Tu reserva sigue en Storeganise";
     overlay.querySelector("#bwp-pay-loading-message").textContent = text;
     overlay.querySelector(".bwp-track").hidden = true;
     var diagnostic = overlay.querySelector("#bwp-pay-diagnostic");
     diagnostic.hidden = false;
-    diagnostic.textContent = "Código de soporte: V4 / " + code;
+    diagnostic.textContent = "Código de soporte: V5 / " + code;
     var button = document.createElement("button");
     button.type = "button";
     button.textContent = "Volver a mi reserva";
@@ -104,18 +131,24 @@
     overlay.querySelector(".bwp-main").appendChild(button);
     button.focus();
     // Diagnostic code only. Never log URLs containing launch tokens or customer data.
-    console.warn("Roatan Pay V4: " + code);
+    console.warn("Roatan Pay V5: " + code);
   }
 
   function nativeRequest(url, accept, stage) {
     var target = new URL(url, STORE_ORIGIN);
     if (target.origin !== STORE_ORIGIN || target.username || target.password || target.hash) return Promise.reject(new Error("INVALID_NATIVE_URL"));
     var controller = new AbortController();
+    activeRequest = controller;
     var timer = window.setTimeout(function () { controller.abort(); }, 25000);
     return fetch(target.href, { method: "GET", credentials: "same-origin", cache: "no-store",
       redirect: "error", signal: controller.signal,
       headers: { Accept: accept, "X-Requested-With": "XMLHttpRequest" }
     }).then(function (response) {
+      if (response.status === 429) {
+        rateLimitPause(response);
+        if (response.body) response.body.cancel().catch(function () {});
+        throw new Error(stage + "_HTTP_429");
+      }
       return response.text().then(function (body) {
         if (body.length > 262144) throw new Error(stage + "_INVALID_RESPONSE");
         var reportedError = responseError(body);
@@ -124,8 +157,10 @@
         return body;
       });
     }).then(function (body) {
+      if (activeRequest === controller) activeRequest = null;
       window.clearTimeout(timer); return body;
     }, function (error) {
+      if (activeRequest === controller) activeRequest = null;
       window.clearTimeout(timer);
       if (controller.signal.aborted) throw new Error(stage + "_TIMEOUT");
       if (error && safeCode(error.message) === error.message) throw error;
@@ -174,37 +209,49 @@
     var element = node && node.closest ? node.closest("a,button") : null;
     if (!element || element.disabled || element.getAttribute("aria-disabled") === "true") return;
     var page = new URL(window.location.href);
+    // Never intercept registration, sign-in, account forms or their buttons.
+    // Keep the listener for SPA navigation, but do no work outside the billing step.
+    var booking = /^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) && page.searchParams.get("step") === "billing";
+    if (!booking) return;
     var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
     var original;
     try { if (href) original = new URL(href, STORE_ORIGIN); } catch (ignore) {}
     var nativeLink = original && original.origin === STORE_ORIGIN && !original.username && !original.password &&
       /^\/api\/v1\/billing\/custom\/?$/.test(original.pathname);
     var label = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    var booking = /^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) && page.searchParams.get("step") === "billing";
-    if (!nativeLink && !(booking && /^(añadir un método de pago|agregar un método de pago|add payment method|continuar a métodos de pago|continuar al pago|pagar)$/.test(label))) return;
+    if (!nativeLink && !/^(añadir un método de pago|agregar un método de pago|add payment method|continuar a métodos de pago|continuar al pago|pagar)$/.test(label)) return;
     var pageOrder = page.searchParams.get("orderId");
     var linkOrder = nativeLink ? original.searchParams.get("orderId") : null;
     var orderId = pageOrder || linkOrder;
-    // Profile add-card buttons without an order keep their native behavior.
-    if (!orderId && !booking) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (busy) return;
     busy = true;
     var currentAttempt = ++attempt;
     setLoading();
+    if (remainingPause() > 0) { failure("CHECKOUT_PAUSED"); return; }
     if (!orderId || !/^[a-f0-9]{24}$/i.test(orderId) ||
       page.searchParams.getAll("orderId").length > 1 ||
       (nativeLink && original.searchParams.getAll("orderId").length > 1) ||
       (pageOrder && linkOrder && pageOrder !== linkOrder)) { failure("RESERVATION_REQUIRED"); return; }
 
-    nativeRequest(STORE_ORIGIN + "/api/v1/units/orders/" + encodeURIComponent(orderId), "application/json", "ORDER")
-      .then(function (body) {
+    var linkSite = nativeLink ? original.searchParams.get("siteId") : null;
+    if ((linkSite && !/^[a-f0-9]{24}$/i.test(linkSite)) ||
+      (nativeLink && (original.searchParams.getAll("siteId").length > 1 || original.searchParams.getAll("returnUrl").length > 1))) {
+      failure("RESERVATION_REQUIRED"); return;
+    }
+    // Avoid an extra API read when Storeganise's original payment link already
+    // includes the site. These IDs route checkout; the server still verifies ownership.
+    pauseCheckout(8000);
+    var siteRequest = linkSite ? Promise.resolve(linkSite) :
+      nativeRequest(STORE_ORIGIN + "/api/v1/units/orders/" + encodeURIComponent(orderId), "application/json", "ORDER").then(function (body) {
         var order;
         try { order = JSON.parse(body); } catch (ignore) { throw new Error("ORDER_INVALID_RESPONSE"); }
         if (!order || order.id !== orderId || !/^[a-f0-9]{24}$/i.test(order.siteId || "")) throw new Error("RESERVATION_REQUIRED");
-        var linkSite = nativeLink ? original.searchParams.get("siteId") : null;
-        if ((linkSite && linkSite !== order.siteId) || (nativeLink && original.searchParams.getAll("siteId").length > 1)) throw new Error("RESERVATION_REQUIRED");
+        return order.siteId;
+      });
+    siteRequest.then(function (siteId) {
+        if (currentAttempt !== attempt) throw new Error("CANCELLED");
         var nativeReturn = nativeLink ? original.searchParams.get("returnUrl") : null;
         var returnPage = nativeReturn ? new URL(nativeReturn, STORE_ORIGIN) : new URL(page.pathname, STORE_ORIGIN);
         if (returnPage.origin !== STORE_ORIGIN || returnPage.username || returnPage.password ||
@@ -215,19 +262,28 @@
         });
         returnPage.searchParams.set("orderId", orderId);
         var checkout = new URL(CHECKOUT_PATH, STORE_ORIGIN);
-        checkout.searchParams.set("siteId", order.siteId);
+        checkout.searchParams.set("siteId", siteId);
         checkout.searchParams.set("orderId", orderId);
         checkout.searchParams.set("returnUrl", returnPage.href);
         // Identity comes from Storeganise's authenticated checkout/webhook, not
         // from IDs in this tag. The signed returnUrl carries the specific order.
         return nativeRequest(checkout.href, "application/json", "CHECKOUT");
       })
-      .then(function (body) { return resolveResponse(body, true); })
+      .then(function (body) {
+        if (currentAttempt !== attempt) throw new Error("CANCELLED");
+        return resolveResponse(body, true);
+      })
       .then(function (destination) { if (currentAttempt === attempt) window.location.assign(destination); })
       .catch(function (error) { if (currentAttempt === attempt) failure(error && error.message || "STOREGANISE_UNAVAILABLE"); });
   }
 
   window.addEventListener("click", continuePayment, true);
+  window.addEventListener("pagehide", function () {
+    attempt++;
+    busy = false;
+    if (activeRequest) activeRequest.abort();
+    activeRequest = null;
+  });
   window.addEventListener("pageshow", function () {
     attempt++;
     busy = false;

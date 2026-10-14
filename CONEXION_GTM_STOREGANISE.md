@@ -2,17 +2,31 @@
 
 Actualización: 14 de octubre de 2026. Revisión por lectura de código. No se ejecutaron servidor, compilación, pruebas ni cobros. La integración desplegada no está validada.
 
-## Corrección de la etiqueta V4
+## Registro: aviso Too many requests
 
-La etiqueta anterior podía mostrar el contenido sin diseño al pie de Storeganise: su política CSP exige un nonce específico para estilos. V4 toma el valor de `#app[data-style-nonce]` de la página actual y lo aplica al estilo antes de insertarlo. No usa el nonce de los scripts ni valores fijos. Se eliminaron los estilos en atributos HTML.
+El aviso reportado aparece al crear la cuenta, antes del pago. Storeganise documenta un máximo de **5 registros desde una misma IP en un período móvil de 24 horas**. No se reinicia a medianoche. La etiqueta de Pay no envía solicitudes de creación de clientes ni puede quitar ese límite del servidor. Para continuar el recorrido, usar una cuenta ya creada; para otro registro, esperar a que termine la ventana. Si ocurre sin haber realizado esos registros, pedir a Storeganise que revise el límite de la cuenta/red.
+
+Fuentes oficiales: [Too many requests](https://help.storeganise.com/article/293-too-many-requests-alert) y [Troubleshooting logging in](https://help.storeganise.com/article/400-troubleshooting-logging-in?type=video).
+
+Se leyó el contenedor público `GTM-N5GX4DLN`: estaba publicada la etiqueta V4, sin los identificadores de las versiones antiguas de redirección. Esto no equivale a inspeccionar todos los contenedores o scripts que pudiera cargar el navegador.
+
+## Corrección de la etiqueta V5
+
+V5 sale inmediatamente cuando la página no es una reserva en `step=billing`: no intercepta registro, inicio de sesión ni administración de métodos de pago del perfil. Solo inicia la conexión al pulsar el botón de pago de la reserva.
+
+Usa el `siteId` del enlace nativo cuando está presente y es válido, ahorrando una consulta. Si falta, lo lee de la reserva. Esos identificadores solo seleccionan el contexto; el servidor sigue verificando la identidad autenticada y la propiedad de la reserva.
+
+Mantiene una única apertura en curso, separa intentos por al menos ocho segundos y respeta `Retry-After` ante HTTP 429. Si el servidor no indica duración, pausa sus propias solicitudes durante un minuto; **no significa que el límite de Storeganise expire en ese tiempo**. No reintenta automáticamente ni recarga la página. Solo guarda la hora de la pausa en sessionStorage, sin datos de clientes ni tokens, y cancela la solicitud pendiente al salir de la página. Esto mejora la apertura del checkout; no corrige ni evita el límite nativo de registros.
+
+Se conserva la corrección de diseño de V4: la política CSP de Storeganise exige un nonce específico para estilos. Se toma el valor de `#app[data-style-nonce]` de la página actual y se aplica al estilo antes de insertarlo. No usa el nonce de los scripts ni valores fijos. Se eliminaron los estilos en atributos HTML.
 
 También conserva `orderId` en la solicitud nativa de checkout, además del retorno, y admite direcciones relativas de la página alojada de Storeganise. El destino final sigue siendo exclusivamente `https://www.payroatanselfstorage.com/?session=...`, con la sesión emitida por el servidor. No basta con llevar al cliente a la raíz de Pay sin una sesión autenticada.
 
 Se reemplazó el error genérico por un código de soporte sin datos personales ni tokens. Esto permite distinguir el fallo de lectura de la reserva (`ORDER_HTTP_...`), el del checkout (`CHECKOUT_HTTP_...`), el de su página alojada (`HOSTED_HTTP_...`) y una respuesta sin enlace válido (`INVALID_CHECKOUT_RESPONSE`). No debe interpretarse automáticamente un 403, 404 o 409 como falta de integración: hay que revisar la respuesta de esa etapa.
 
-Para usar V4, reemplazar **todo** el contenido de la etiqueta en Google Tag Manager con [el archivo completo](examples/gtm-storeganise-pago.html), publicar esa versión y recargar la página de Storeganise. Mantener una sola etiqueta de pagos. GitHub/Vercel no actualizan por sí solos Google Tag Manager.
+Para usar V5, reemplazar **todo** el contenido de la etiqueta en Google Tag Manager con [el archivo completo](examples/gtm-storeganise-pago.html), publicar esa versión y recargar la página de Storeganise. Mantener una sola etiqueta de pagos. GitHub/Vercel no actualizan por sí solos Google Tag Manager.
 
-Esta corrección se limita a la etiqueta y esta guía. No cambia la conexión de CyberSource, credenciales, configuración de entornos ni controles del servidor. No se confirmó aún una respuesta de checkout válida con la sesión de un cliente; por eso no se afirma que el recorrido completo ya funcione. Si falla, comunicar únicamente el código `V4 / ...` mostrado, sin enviar cookies, contraseñas ni enlaces con tokens.
+Esta corrección se limita a la etiqueta y esta guía. No cambia la conexión de CyberSource, credenciales, configuración de entornos ni controles del servidor. No se confirmó aún una respuesta de checkout válida con la sesión de un cliente; por eso no se afirma que el recorrido completo ya funcione. Si falla, comunicar únicamente el código `V5 / ...` mostrado, sin enviar cookies, contraseñas ni enlaces con tokens.
 
 ## Qué incluye esta versión
 
@@ -34,10 +48,10 @@ Está preparado un [mensaje concreto para Storeganise](SOLICITUD_STOREGANISE_ACC
 
 1. Desplegar este commit en Vercel y conservar PAY_PUBLIC_URL=https://www.payroatanselfstorage.com.
 2. Habilitar con Storeganise la integración y el recorrido anteriores. No publicar el reemplazo suponiendo que corrige por sí solo el 404.
-3. Reemplazar completamente la etiqueta HTML anterior por [examples/gtm-storeganise-pago.html](examples/gtm-storeganise-pago.html). Mantener una sola etiqueta de pago, activada en All Pages.
+3. Reemplazar completamente la etiqueta HTML anterior por [examples/gtm-storeganise-pago.html](examples/gtm-storeganise-pago.html). Mantener una sola etiqueta de pago, activada en All Pages, con disparo una vez por página. El script espera al paso de pago dentro de la navegación de Storeganise; no llama a la API por cargar la etiqueta.
 4. Publicar en Google Tag Manager y recargar Storeganise. Subir archivos a GitHub no modifica una etiqueta ya publicada.
 
-El script utiliza la sesión activa dentro del dominio Storeganise para leer la reserva y obtener su siteId. Solicita el checkout nativo con Accept: application/json y un returnUrl que conserva la reserva y los parámetros nativos de retorno. No muestra ese endpoint como página al cliente: obtiene el destino autenticado y navega a https://www.payroatanselfstorage.com/?session=...
+El script utiliza la sesión activa dentro del dominio Storeganise. Obtiene el siteId del enlace nativo o, si falta, lee la reserva. Solicita el checkout nativo con Accept: application/json y un returnUrl que conserva la reserva y los parámetros nativos de retorno. No muestra ese endpoint como página al cliente: obtiene el destino autenticado y navega a https://www.payroatanselfstorage.com/?session=...
 
 Solo acepta ese dominio y un token de apertura de 43 caracteres. Si Storeganise devuelve un wrapper alojado en su propia ruta de facturación, puede leerlo una vez y extraer el enlace privado del HTML emitido por nuestro servidor. No ejecuta scripts de esa respuesta ni adivina un enlace si el proveedor devuelve otro contrato. No transmite claves, contraseñas, nombres, correos o importes en la URL.
 

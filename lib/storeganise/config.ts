@@ -1,5 +1,6 @@
 import { gatewayEnvironment } from '../cybersource/environment';
 import { storeganiseConfiguration } from './client';
+import { isStoreganiseCustomerReturnUrl } from './customer-origins';
 
 export class StoreganiseIntegrationError extends Error {
   constructor(readonly code: string, readonly httpStatus = 409) { super(code); this.name = 'StoreganiseIntegrationError'; }
@@ -35,7 +36,6 @@ export function storeganiseReturnUrl(value?: string): string {
   if (!value) return fallback;
   let candidate: URL;
   try { candidate = new URL(value); } catch { return fallback; }
-  if (candidate.origin !== url.origin || candidate.username || candidate.password ||
-    candidate.pathname.startsWith('/api/') || candidate.pathname.startsWith('/admin')) return fallback;
+  if (!isStoreganiseCustomerReturnUrl(candidate, url.origin)) return fallback;
   return candidate.href;
 }

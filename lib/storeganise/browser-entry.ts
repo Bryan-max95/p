@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { StoreganiseIntegrationError } from './config';
 import { storeganiseConfiguration } from './client';
+import { isStoreganiseCustomerReturnUrl } from './customer-origins';
 import { sgId } from './records';
 
 export type StoreganiseSearchParams = Record<string,string|string[]|undefined>;
@@ -15,8 +16,7 @@ export function storeganiseBookingReturn(value:unknown):URL|undefined {
   let target:URL;
   try{target=new URL(value);}catch{throw new StoreganiseIntegrationError('INVALID_STOREGANISE_RETURN_URL',400);}
   const {url}=storeganiseConfiguration();
-  if(target.origin!==url.origin||target.username||target.password||
-    /^\/(api|admin)(\/|$)/i.test(target.pathname))throw new StoreganiseIntegrationError('INVALID_STOREGANISE_RETURN_URL',403);
+  if(!isStoreganiseCustomerReturnUrl(target,url.origin))throw new StoreganiseIntegrationError('INVALID_STOREGANISE_RETURN_URL',403);
   return target;
 }
 

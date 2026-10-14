@@ -4,11 +4,12 @@
 
   // Replace the ENTIRE previous payment tag and publish only one payment tag.
   // No API keys, passwords, prices or identity tokens belong in this script.
-  var STORE_ORIGIN = "https://roatanselfstorage.storeganise.com";
+  var STORE_ORIGINS = ["https://booking.roatanselfstorage.com", "https://roatanselfstorage.storeganise.com"];
+  var STORE_ORIGIN = window.location.origin;
   var PAY_URL = "https://www.payroatanselfstorage.com";
   var CHECKOUT_PATH = "/api/v1/billing/custom";
-  if (window.location.origin !== STORE_ORIGIN || window.__BWP_SIGNED_PAY_V5__) return;
-  window.__BWP_SIGNED_PAY_V5__ = true;
+  if (STORE_ORIGINS.indexOf(STORE_ORIGIN) === -1 || window.__BWP_SIGNED_PAY_V6__) return;
+  window.__BWP_SIGNED_PAY_V6__ = true;
   var busy = false;
   var attempt = 0;
   var activeRequest;
@@ -119,7 +120,7 @@
     overlay.querySelector(".bwp-track").hidden = true;
     var diagnostic = overlay.querySelector("#bwp-pay-diagnostic");
     diagnostic.hidden = false;
-    diagnostic.textContent = "Código de soporte: V5 / " + code;
+    diagnostic.textContent = "Código de soporte: V6 / " + code;
     var button = document.createElement("button");
     button.type = "button";
     button.textContent = "Volver a mi reserva";
@@ -131,11 +132,13 @@
     overlay.querySelector(".bwp-main").appendChild(button);
     button.focus();
     // Diagnostic code only. Never log URLs containing launch tokens or customer data.
-    console.warn("Roatan Pay V5: " + code);
+    console.warn("Roatan Pay V6: " + code);
   }
 
   function nativeRequest(url, accept, stage) {
     var target = new URL(url, STORE_ORIGIN);
+    // Use the active customer domain so Storeganise receives its own session
+    // cookie. Never fetch the other alias or the admin API from the browser.
     if (target.origin !== STORE_ORIGIN || target.username || target.password || target.hash) return Promise.reject(new Error("INVALID_NATIVE_URL"));
     var controller = new AbortController();
     activeRequest = controller;
@@ -216,7 +219,7 @@
     var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
     var original;
     try { if (href) original = new URL(href, STORE_ORIGIN); } catch (ignore) {}
-    var nativeLink = original && original.origin === STORE_ORIGIN && !original.username && !original.password &&
+    var nativeLink = original && STORE_ORIGINS.indexOf(original.origin) !== -1 && !original.username && !original.password &&
       /^\/api\/v1\/billing\/custom\/?$/.test(original.pathname);
     var label = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
     if (!nativeLink && !/^(añadir un método de pago|agregar un método de pago|add payment method|continuar a métodos de pago|continuar al pago|pagar)$/.test(label)) return;
@@ -254,7 +257,7 @@
         if (currentAttempt !== attempt) throw new Error("CANCELLED");
         var nativeReturn = nativeLink ? original.searchParams.get("returnUrl") : null;
         var returnPage = nativeReturn ? new URL(nativeReturn, STORE_ORIGIN) : new URL(page.pathname, STORE_ORIGIN);
-        if (returnPage.origin !== STORE_ORIGIN || returnPage.username || returnPage.password ||
+        if (STORE_ORIGINS.indexOf(returnPage.origin) === -1 || returnPage.username || returnPage.password ||
           /^\/(api|admin)(\/|$)/i.test(returnPage.pathname) || returnPage.searchParams.getAll("orderId").length > 1 ||
           (returnPage.searchParams.get("orderId") && returnPage.searchParams.get("orderId") !== orderId)) throw new Error("RESERVATION_REQUIRED");
         if (!nativeReturn) ["date", "step", "lang", "_n"].forEach(function (key) {

@@ -150,7 +150,12 @@ export function usePaymentSession(manualSandboxEnabled = false) {
       url.searchParams.delete('session');
       window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
       initialRequest.current = (async () => {
-        if (token) return paymentRequest<PaymentResponse>('/api/pay/session', { token });
+        if (token) {
+          // A new handoff must never fall back to another customer's previous
+          // tab session if its token is expired or the exchange fails.
+          window.sessionStorage.removeItem('pay-session-id');
+          return paymentRequest<PaymentResponse>('/api/pay/session', { token });
+        }
         const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
         const requestedDemo = local && (url.searchParams.has('demo') || url.searchParams.has('scenario'));
         // Opening the public carousel must not create a session or contact payment services.

@@ -7,6 +7,7 @@ export interface StoreganiseContext {
   unitId: string; siteId: string; jobId?: string;
   unitTypeId?: string;
   selectedUnitId?: string;
+  reservationAuthentication?: 'customer-token' | 'signed-checkout';
 }
 
 export interface CheckoutSessionInput {

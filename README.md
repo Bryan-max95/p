@@ -2,7 +2,7 @@
 
 Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Muestra el saldo en USD, calcula el cargo en HNL con la tasa BCH y guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
 
-Actualización del código: 13 de octubre de 2026. Esta actualización se realizó sin ejecutar pruebas, compilación, servidor ni operaciones bancarias. Los resultados históricos de sandbox no validan la integración nueva.
+Actualización del código: 14 de octubre de 2026. Esta actualización se realizó sin ejecutar pruebas, compilación, servidor ni operaciones bancarias. Los resultados históricos de sandbox no validan la integración nueva.
 
 ## Integración incorporada
 
@@ -13,7 +13,7 @@ Actualización del código: 13 de octubre de 2026. Esta actualización se realiz
 5. Pay puede completar el paso pendiente de la factura inicial ya pagada. Solo muestra la bodega habilitada después de comprobar que está ocupada por ese cliente y ese alquiler.
 6. Storeganise notifica al portal fiscal mediante la conexión que administra el comercio. Pay no envía avisos directos al portal.
 
-La entrada implementada requiere una factura creada y emitida. El checkout nativo para agregar un método de pago puede ocurrir antes de ese paso: seleccionar sus webhooks no instala automáticamente la redirección. Se debe conectar el handoff del servidor descrito en [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md). No se almacenan tarjetas para cargos recurrentes.
+El enlace firmado permite abrir el carrusel sin volver a pedir la contraseña. Para reservas sin factura interna, el servidor consulta la vista previa del importe en Storeganise. Antes de cobrar, la reserva debe estar confirmada y disponer de un registro contable cobrable; Pay no omite firmas ni fuerza la ocupación. Seleccionar webhooks no instala la integración de facturación que entrega el enlace al navegador. La activación de esa integración y sus automatizaciones siguen pendientes de confirmar en la cuenta externa; ver [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md). No se almacenan tarjetas para cargos recurrentes.
 
 ## Publicación
 

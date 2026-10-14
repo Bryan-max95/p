@@ -93,7 +93,8 @@ export function publicSession(row: SessionRow) {
     authenticationPending: row.status==='pending' && ['DEVICE_COLLECTION_REQUIRED','CHALLENGE_REQUIRED'].includes(row.gateway_status ?? ''),
     ...(['declined', 'unknown'].includes(status) ? { failureCode: legacyReview ? 'PAYMENT_NOT_CONFIRMED' : paymentFailureCode(row.failure_reason, row.gateway_status) } : {}),
     ...(row.storeganise_context ? {
-      requiresReservationConfirmation: row.storeganise_context.kind === 'reservation',
+      requiresReservationConfirmation: row.storeganise_context.kind === 'reservation' &&
+        row.storeganise_context.reservationAuthentication !== 'signed-checkout',
       storeganise: { status: row.storeganise_status ?? 'waiting_payment', paymentId: row.storeganise_payment_id ?? undefined,
         returnUrl: storeganiseReturnUrl(row.return_url) },
       billingRequired: !billToSchema.safeParse(row.bill_to).success,

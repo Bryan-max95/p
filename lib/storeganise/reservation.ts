@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { customerGet, customerPut, authenticatedCustomerToken } from './customer';
 import { assertStoreganiseEnabled, StoreganiseIntegrationError, storeganiseReturnUrl } from './config';
 import { getJob, getUser, getUnit, assertOrderActive, sgId, usdAmount } from './records';
-import { storeganiseGet } from './client';
+import { storeganiseGet, storeganiseRequest } from './client';
 import { openStoreganiseCheckout, resolveCheckout } from './checkout';
 import { query, transaction } from '../pay/db';
 import { createCheckoutSession, requiredUrl } from '../pay/service';
@@ -51,6 +51,33 @@ export async function openReservationCheckout(value: unknown) {
   const input = reservationInput.parse(value);
   const token = await authenticatedCustomerToken();
   const context = await readReservation(token, input.orderId);
+  return openReservationForContext(input, context, token);
+}
+
+/** Call only after authenticating a server-to-server Storeganise handoff.
+ * Never expose this function through the unsigned browser reservation route.
+ * An account ID, email or Origin header is not proof of identity.
+ */
+export async function openSignedReservationCheckout(value: unknown) {
+  const input = reservationInput.extend({ userId: sgId, siteId: sgId.optional() }).parse(value);
+  const config = assertStoreganiseEnabled();
+  const job = await getJob(input.orderId);
+  if (job.ownerId !== input.userId || job.type !== 'unit_moveIn' ||
+    (input.siteId && job.result.siteId !== input.siteId)) {
+    throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+  }
+  assertOrderActive(job);
+  if (job.result.invoiceId) return openStoreganiseCheckout(input);
+  // The Management Portal uses this read-only operation to preview the exact
+  // initial invoice. Never use browser prices or a unit's advertised rent.
+  const preview = z.object({ total: z.number().finite() }).passthrough().parse(
+    await storeganiseRequest(`/jobs/${job.id}/operations/previewInvoice`, 'POST'));
+  const order = orderSchema.parse({ ...job.result, id: job.id, invoicePreview: preview });
+  return openReservationForContext(input, { ...config, job, order, customerId: input.userId });
+}
+
+async function openReservationForContext(input: z.infer<typeof reservationInput>,
+  context: Awaited<ReturnType<typeof readReservation>>, token?: string) {
   const { order, job, customerId, environment, url } = context;
   if (job.result.invoiceId) return openStoreganiseCheckout({ userId: customerId, orderId: job.id, returnUrl: input.returnUrl });
   if (!order.invoicePreview) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_TOTAL_UNAVAILABLE');
@@ -58,7 +85,9 @@ export async function openReservationCheckout(value: unknown) {
   const [user, settings, type] = await Promise.all([
     getUser(customerId),
     storeganiseGet<{ currencyCode: string; manualPaymentMethods?: Array<{ code: string }> }>('/settings'),
-    customerGet<{ id: string; title?: unknown; name?: string; code?: string }>(token, `/sites/${order.siteId}/unit-types/${order.unitTypeId}`),
+    token
+      ? customerGet<{ id: string; title?: unknown; name?: string; code?: string }>(token, `/sites/${order.siteId}/unit-types/${order.unitTypeId}`)
+      : storeganiseGet<{ id: string; title?: unknown; name?: string; code?: string }>(`/unit-types/${order.unitTypeId}`),
   ]);
   if (user.isDisabled) throw new StoreganiseIntegrationError('CUSTOMER_DISABLED', 403);
   if (settings.currencyCode !== 'USD') throw new StoreganiseIntegrationError('STOREGANISE_CURRENCY_MISMATCH');
@@ -81,6 +110,7 @@ export async function openReservationCheckout(value: unknown) {
   };
   const binding: StoreganiseContext = { kind: 'reservation', apiOrigin: url.origin, customerId,
     jobId: job.id, siteId: order.siteId, unitId: selectionId, unitTypeId: order.unitTypeId,
+    reservationAuthentication: token ? 'customer-token' : 'signed-checkout',
     ...(unit ? { selectedUnitId: unit.id } : {}) };
   const returnUrl = storeganiseReturnUrl(input.returnUrl);
   const rate = await currentBchRate();
@@ -93,6 +123,9 @@ export async function openReservationCheckout(value: unknown) {
       const existingBinding = session.storeganise_context;
       if (!existingBinding || session.customer_id !== customerId || existingBinding.apiOrigin !== url.origin ||
         existingBinding.jobId !== job.id) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+      if (existingBinding.reservationAuthentication === 'signed-checkout') {
+        binding.reservationAuthentication = 'signed-checkout';
+      }
       if (existingBinding.kind === 'reservation' && ['open', 'declined'].includes(session.status) && !needsLegacyPaymentReview(session)) {
         // Never change a quote that is already authenticating/processing or paid.
         if (session.expires_at.getTime() <= Date.now() || Number(session.reference_usd_amount).toFixed(2) !== amount ||
@@ -103,6 +136,13 @@ export async function openReservationCheckout(value: unknown) {
           [session.id, amount, hnlCharge(amount, rate.hnlPerUsd), rate.hnlPerUsd, rate.rateDate, rate.fetchedAt,
             selectionId, unitName, JSON.stringify(binding)]);
           session = renewed.rows[0];
+        }
+        // Replace the legacy cookie dependency only after a verified handoff,
+        // preserving the current quote when the reservation has not changed.
+        if (!token && session.storeganise_context?.reservationAuthentication !== 'signed-checkout') {
+          session = (await client.query<SessionRow>(`UPDATE pay_sessions
+            SET storeganise_context=storeganise_context || '{"reservationAuthentication":"signed-checkout"}'::jsonb,
+              updated_at=now() WHERE id=$1 RETURNING *`, [session.id])).rows[0];
         }
       }
     } else {
@@ -133,32 +173,50 @@ export async function openReservationCheckout(value: unknown) {
 export async function prepareReservationForPayment(session: SessionRow) {
   const binding = session.storeganise_context;
   if (binding?.kind !== 'reservation' || !binding.jobId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-  const token = await authenticatedCustomerToken();
-  const context = await readReservation(token, binding.jobId);
-  if (context.customerId !== session.customer_id || context.url.origin !== binding.apiOrigin ||
-    context.environment !== session.environment || context.order.siteId !== binding.siteId ||
-    context.order.unitTypeId !== binding.unitTypeId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-  if (binding.selectedUnitId && (context.order.unitId ?? context.job.result.unitId) !== binding.selectedUnitId) {
-    throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
-  }
-  if (!context.job.result.invoiceId) {
-    if (!context.order.invoicePreview || usdAmount(context.order.invoicePreview.total) !== Number(session.reference_usd_amount).toFixed(2)) {
+  if (binding.reservationAuthentication === 'signed-checkout') {
+    const { url, environment } = assertStoreganiseEnabled();
+    const job = await getJob(binding.jobId);
+    if (url.origin !== binding.apiOrigin || environment !== session.environment ||
+      job.ownerId !== session.customer_id || job.ownerId !== binding.customerId ||
+      job.type !== 'unit_moveIn' || job.result.siteId !== binding.siteId ||
+      (binding.selectedUnitId && job.result.unitId !== binding.selectedUnitId)) {
+      throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+    }
+    assertOrderActive(job);
+    if (binding.unitTypeId && job.result.unitTypeId !== binding.unitTypeId) {
       throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
     }
-    if (context.order.orderState === 'notSubmitted') {
-      const claimed = await query(`UPDATE pay_sessions SET storeganise_submit_started=true,updated_at=now()
-        WHERE id=$1 AND storeganise_submit_started=false AND status IN ('open','declined') AND expires_at>now()
-          AND reference_usd_amount=$2 AND storeganise_context->>'kind'='reservation' RETURNING id`,
-      [session.id, session.reference_usd_amount]);
-      // Another request, a timeout or a crash may already have submitted this order.
-      // Observe its state on the next attempt instead of repeating a write blindly.
-      if (!claimed.rowCount) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED');
-      // The same customer-scoped submit operation used by Storeganise's review step.
-      // Do not complete admin steps, fabricate payment sources, or skip agreements.
-      await customerPut(token, `/units/orders/${binding.jobId}`, {
-        siteId: context.order.siteId, unitTypeId: context.order.unitTypeId,
-        startDate: context.order.startDate, submitNow: true,
-      });
+    // Identity verification does not replace booking/contract confirmation.
+    // Storeganise must accept the order before Pay collects money against it.
+    if (!job.result.invoiceId) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_PENDING', 409);
+  } else {
+    const token = await authenticatedCustomerToken();
+    const context = await readReservation(token, binding.jobId);
+    if (context.customerId !== session.customer_id || context.url.origin !== binding.apiOrigin ||
+      context.environment !== session.environment || context.order.siteId !== binding.siteId ||
+      context.order.unitTypeId !== binding.unitTypeId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+    if (binding.selectedUnitId && (context.order.unitId ?? context.job.result.unitId) !== binding.selectedUnitId) {
+      throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
+    }
+    if (!context.job.result.invoiceId) {
+      if (!context.order.invoicePreview || usdAmount(context.order.invoicePreview.total) !== Number(session.reference_usd_amount).toFixed(2)) {
+        throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
+      }
+      if (context.order.orderState === 'notSubmitted') {
+        const claimed = await query(`UPDATE pay_sessions SET storeganise_submit_started=true,updated_at=now()
+          WHERE id=$1 AND storeganise_submit_started=false AND status IN ('open','declined') AND expires_at>now()
+            AND reference_usd_amount=$2 AND storeganise_context->>'kind'='reservation' RETURNING id`,
+        [session.id, session.reference_usd_amount]);
+        // Another request, a timeout or a crash may already have submitted this order.
+        // Observe its state on the next attempt instead of repeating a write blindly.
+        if (!claimed.rowCount) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED');
+        // The same customer-scoped submit operation used by Storeganise's review step.
+        // Do not complete admin steps, fabricate payment sources, or skip agreements.
+        await customerPut(token, `/units/orders/${binding.jobId}`, {
+          siteId: context.order.siteId, unitTypeId: context.order.unitTypeId,
+          startDate: context.order.startDate, submitNow: true,
+        });
+      }
     }
   }
   const job = await getJob(binding.jobId);

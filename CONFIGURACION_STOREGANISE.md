@@ -4,13 +4,13 @@ Estado del código al 14 de octubre de 2026. Implementado, sin ejecutar validaci
 
 ## Entrada desde la reserva mediante GTM
 
-El recorrido del botón de pago ahora utiliza [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md): GTM abre la API /api/storeganise/reservation de Pay; Pay autentica al cliente con su cuenta Storeganise y consulta su reserva y total. El carrusel puede abrirse sin factura interna previa. Al confirmar y pagar, el servidor envía la reserva y exige que Storeganise confirme su registro interno cobrable antes de autorizar la tarjeta. La factura fiscal del portal sigue siendo posterior al pago.
+El recorrido actualizado se describe en [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md): GTM solicita un enlace a la integración de facturación autenticada de Storeganise y navega a Pay. Pay ya no muestra un segundo formulario de contraseña. La integración externa debe estar habilitada; la etiqueta por sí sola no sustituye ese requisito. El carrusel puede mostrar una reserva sin factura interna previa, pero Storeganise debe confirmar su registro cobrable antes de autorizar la tarjeta. La factura fiscal del portal sigue siendo posterior al pago.
 
 Este recorrido incluye un inicio de sesión en Pay cuando no existe una sesión de cliente válida de Pay. El inicio de sesión que ya existe en otro dominio no se transfiere mediante una URL. Ver el archivo de conexión para publicar la etiqueta, los requisitos de autenticación y las automatizaciones pendientes de comprobar.
 
-## Punto de entrada alternativo firmado, con factura interna
+## Punto de entrada firmado
 
-Pay recibe una factura interna de Storeganise ya creada, emitida y con saldo pendiente. Esa factura identifica la deuda; la factura fiscal continúa siendo responsabilidad del portal del comercio.
+Pay recibe una reserva o una factura interna identificada por el servidor autenticado de Storeganise. Una reserva sin factura utiliza la operación de vista previa para mostrar el total. La factura interna debe estar creada, emitida y con saldo pendiente antes del cobro. La factura fiscal continúa siendo responsabilidad del portal del comercio.
 
 El servidor que atiende al usuario autenticado debe solicitar el enlace mediante POST a:
 
@@ -33,19 +33,19 @@ Respuesta:
 
     {"url":"https://payroatanselfstorage.com/?session=TOKEN_DE_UN_SOLO_USO"}
 
-El servidor devuelve esa URL al navegador para redirigirlo. Puede enviar orderId o jobId en lugar de invoiceId si identifica una entrada unit_moveIn cuyo result.invoiceId ya existe. No enviar una orden de presupuesto ni escoger la última factura del cliente. No se recibe monto del navegador.
+El servidor devuelve esa URL al navegador para redirigirlo. Puede enviar orderId o jobId en lugar de invoiceId para identificar una entrada unit_moveIn del usuario autenticado. Si todavía no tiene factura, Pay consulta su vista previa; no elige la última factura del cliente ni recibe el monto del navegador.
 
 La función [examples/storeganise-handoff.ts](examples/storeganise-handoff.ts) muestra la firma y la petición. Se integra en el servidor/add-on que autentica al cliente, nunca en JavaScript público. Pay verifica por API las relaciones usuario → factura → alquiler → bodega y conserva esos IDs durante todo el pago.
 
 ## Qué configurar en Storeganise
 
-- Para la entrada alternativa firmada, un handoff después de crear y emitir la factura. Para la entrada por reserva, la etiqueta y API descritas arriba.
+- Un handoff firmado del servidor de Storeganise para esa reserva o factura. Habilitar la integración que devuelve ese enlace al navegador y las automatizaciones de confirmación de la reserva antes del cobro.
 - API key con lectura de configuración, usuarios, facturas, alquileres, bodegas y entradas; además permiso para registrar pagos. Si se activa la finalización del paso de factura, también necesita actualizar ese paso de la entrada.
 - Un método de pago externo con código card, o su código real en STOREGANISE_CARD_PAYMENT_METHOD. El registro API usa type manual porque el banco cobra fuera de Storeganise; el método mostrado corresponde al código de tarjeta configurado.
 - Automatizaciones y requisitos de entrada que permitan completar la ocupación después de pagar. Pay no firma contratos, aprueba identidad ni modifica directamente la bodega para saltar pasos.
 - Secreto real de firma, igual al valor privado STOREGANISE_WEBHOOK_SECRET de Pay.
 
-El flujo nativo billing.checkout está orientado a agregar un método de pago y puede ejecutarse antes de confirmar la orden. La aplicación de Pay admite un handoff con factura, pero no implementa un proveedor de tarjetas guardadas ni cargos recurrentes: billing.list devuelve una lista vacía y billing.charge exige acción del cliente. No habilitar esos eventos como sustituto del handoff descrito arriba. Cuando todavía no existe una factura, responde ORDER_REQUIRES_CONFIRMED_INVOICE.
+El flujo nativo billing.checkout está orientado a agregar un método de pago y puede ejecutarse antes de confirmar la orden. Pay admite un handoff por reserva o factura, pero no implementa tarjetas guardadas ni cargos recurrentes: billing.list devuelve una lista vacía y billing.charge exige acción del cliente. La integración externa debe admitir el pago puntual; no basta con seleccionar esos eventos. Una reserva firmada sin factura puede mostrar su total, pero si sigue sin registro cobrable al pagar, responde STOREGANISE_RESERVATION_PENDING sin iniciar la autorización.
 
 ## Webhooks de seguimiento
 

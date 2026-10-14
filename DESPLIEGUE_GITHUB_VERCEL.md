@@ -55,7 +55,7 @@ Cada ejecución procesa lotes pequeños. El respaldo diario no ofrece recuperaci
 
 ## Conexión externa pendiente
 
-Seguir [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md): redirección después de emitir la factura, firma, método tarjeta y automatizaciones de entrada. Publicar Pay no cambia la configuración de Storeganise ni conecta por sí mismo su botón de pago.
+Seguir [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md) y [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md): enlace autenticado por reserva, firma, método tarjeta y automatizaciones de confirmación y ocupación. Publicar Pay no cambia la configuración de Storeganise ni conecta por sí mismo su botón de pago. La etiqueta se publica por separado en GTM después de habilitar la integración externa.
 
 Las pruebas y aprobaciones históricas corresponden a otras revisiones. No atribuir esos resultados a este código sin validarlo. La última comprobación de producción documentada anteriormente devolvió HTTP 401; no se repitió en esta actualización.
 

@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from 'react';
 import Image from 'next/image';
+import PayTransition from './pay-transition';
 import Link from 'next/link';
 import { 
   motion, 
@@ -262,7 +263,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
       className="w-full text-center text-sm font-mono font-bold px-3.5 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#1e3a8a]/20 focus:border-[#1e3a8a] text-slate-800 transition-all" />
   </div>;
 
-  if(payment.loading)return <main className="min-h-screen grid place-items-center bg-[#eef5fc]"><RefreshCw className="h-8 w-8 animate-spin text-[#1F5C4F]" /></main>;
+  if(payment.loading)return <PayTransition />;
   if(payment.exchangeRateUnavailable && !payment.session)return <main className="min-h-screen grid place-items-center bg-[#eef5fc] px-6"><div className="max-w-lg rounded-3xl bg-white p-8 text-center shadow-xl"><h1 className="font-display text-xl font-extrabold">{lang==='es'?'Tipo de cambio no disponible':'Exchange rate unavailable'}</h1><p className="mt-2 text-sm text-slate-600">{lang==='es'?'No podemos confirmar el importe en lempiras en este momento. No se ha realizado ningún cobro. Intente nuevamente más tarde.':'We cannot confirm the amount in lempiras right now. No charge has been made. Please try again later.'}</p><button onClick={()=>window.location.reload()} className="mt-4 rounded-xl bg-[#1F5C4F] px-5 py-3 text-sm font-bold text-white">{lang==='es'?'Reintentar':'Try again'}</button></div></main>;
   if(payment.localDemoUnavailable && !payment.session)return <main className="min-h-screen grid place-items-center bg-[#eef5fc] px-6"><div className="max-w-lg rounded-3xl bg-white p-8 text-center shadow-xl"><h1 className="font-display text-xl font-extrabold">{lang==='es'?'No se pudo abrir la prueba sandbox':'Sandbox test unavailable'}</h1><p className="mt-2 text-sm text-slate-500">{lang==='es'?'No se pudo crear la sesión de prueba. Compruebe la conexión de Neon y vuelva a intentar.':'The test session could not be created. Check the Neon connection and try again.'}</p><button onClick={()=>window.location.reload()} className="mt-4 rounded-xl bg-[#1F5C4F] px-5 py-3 text-sm font-bold text-white">{lang==='es'?'Reintentar':'Try again'}</button></div></main>;
 

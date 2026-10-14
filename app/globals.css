@@ -1,5 +1,15 @@
 @import "tailwindcss";
 
+@keyframes pay-transition-progress {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
+}
+
+.pay-transition-progress { animation: pay-transition-progress 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pay-transition-progress { animation: none; width: 100%; opacity: 0.45; }
+}
+
 @theme {
   --font-sans: var(--font-inter), sans-serif;
   --font-display: var(--font-outfit), sans-serif;

@@ -1,19 +1,22 @@
 /**
  * Install in the authenticated Storeganise booking server/add-on, not in a browser.
- * Its caller must take authenticatedUserId from the verified login, and invoiceId
- * from that user's confirmed order. Never take a user ID from an unsigned URL.
+ * Its caller must take authenticatedUserId from the verified login, and orderId
+ * or invoiceId from that user's booking. Never trust an unsigned user ID.
  * This module is an integration example; it is not an open API route in Pay.
  */
 import crypto from 'node:crypto';
 
 export async function createPayRedirect(input: {
   authenticatedUserId: string;
-  invoiceId: string;
+  invoiceId?: string;
+  orderId?: string;
   returnUrl?: string;
 }): Promise<string> {
   if (typeof window !== 'undefined') throw new Error('Server-only integration');
-  if (![input.authenticatedUserId,input.invoiceId].every(value=>/^[a-f0-9]{24}$/i.test(value))) {
-    throw new Error('A confirmed Storeganise user and invoice are required');
+  if ((!input.orderId && !input.invoiceId) || ![input.authenticatedUserId,
+    ...(input.invoiceId === undefined ? [] : [input.invoiceId]),
+    ...(input.orderId === undefined ? [] : [input.orderId])].every(value=>/^[a-f0-9]{24}$/i.test(value))) {
+    throw new Error('An authenticated Storeganise user and specific order or invoice are required');
   }
   const secret=process.env.STOREGANISE_WEBHOOK_SECRET;
   const configured=process.env.PAY_PUBLIC_URL;
@@ -21,7 +24,8 @@ export async function createPayRedirect(input: {
   const origin=new URL(configured);
   if(origin.protocol!=='https:'||origin.username||origin.password)throw new Error('HTTPS Pay origin required');
   const body=JSON.stringify({type:'pay.checkout',id:crypto.randomUUID(),created:new Date().toISOString(),
-    data:{userId:input.authenticatedUserId,invoiceId:input.invoiceId,...(input.returnUrl?{returnUrl:input.returnUrl}:{})}});
+    data:{userId:input.authenticatedUserId,invoiceId:input.invoiceId,orderId:input.orderId,
+      ...(input.returnUrl?{returnUrl:input.returnUrl}:{})}});
   const signature=crypto.createHmac('sha256',secret).update(body).digest('base64');
   const response=await fetch(new URL('/api/storeganise/checkout',origin),{
     method:'POST',redirect:'error',cache:'no-store',signal:AbortSignal.timeout(60_000),

@@ -2,73 +2,208 @@
 (function () {
   "use strict";
 
+  // Replace the ENTIRE previous payment tag and publish only one payment tag.
+  // No API keys, passwords, prices or identity tokens belong in this script.
   var STORE_ORIGIN = "https://roatanselfstorage.storeganise.com";
   var PAY_URL = "https://www.payroatanselfstorage.com";
-  var ENTRY_API = PAY_URL + "/api/storeganise/reservation";
-  if (window.location.origin !== STORE_ORIGIN || window.__BWP_RESERVATION_PAY_V2__) return;
-  window.__BWP_RESERVATION_PAY_V2__ = true;
-  var navigating = false;
+  var CHECKOUT_PATH = "/api/v1/billing/custom";
+  if (window.location.origin !== STORE_ORIGIN || window.__BWP_SIGNED_PAY_V3__) return;
+  window.__BWP_SIGNED_PAY_V3__ = true;
+  var busy = false;
+  var attempt = 0;
+  var focusedElement;
+  var overlay;
 
-  function showError(element, message) {
-    var notice = document.getElementById("bwp-reservation-pay-error");
-    if (!notice) {
-      notice = document.createElement("p");
-      notice.id = "bwp-reservation-pay-error";
-      notice.setAttribute("role", "alert");
-      notice.style.cssText = "color:#9f1239;font-size:14px;margin:12px 0;";
-      element.parentNode.insertBefore(notice, element.nextSibling);
+  function setLoading() {
+    if (overlay) overlay.remove();
+    var style = document.getElementById("bwp-pay-loading-style");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "bwp-pay-loading-style";
+      style.textContent = "#bwp-pay-loading{position:fixed;inset:0;z-index:2147483647;background:#f8faf8;color:#123d33;font:16px/1.6 system-ui,sans-serif;overflow:auto;overscroll-behavior:contain;display:grid;grid-template-columns:1fr 1fr}"
+        + "#bwp-pay-loading *{box-sizing:border-box}#bwp-pay-loading .bwp-brand{background:#164d40;color:white;padding:48px;display:flex;flex-direction:column;justify-content:space-between;min-height:100dvh}"
+        + "#bwp-pay-loading .bwp-logo{width:128px;height:128px;padding:4px;background:white;border-radius:20px}"
+        + "#bwp-pay-loading .bwp-tagline{font-size:48px;font-weight:600;line-height:1.15;max-width:450px;margin:40px 0}"
+        + "#bwp-pay-loading .bwp-main{display:flex;flex-direction:column;justify-content:center;padding:48px;max-width:540px;width:100%;margin:auto}"
+        + "#bwp-pay-loading .bwp-bac{width:132px;height:auto;max-height:45px;object-fit:contain;margin:0 0 40px}"
+        + "#bwp-pay-loading h2{font-size:32px;line-height:1.2;letter-spacing:-1px;margin:0 0 20px;color:#123d33}#bwp-pay-loading p{margin:0 0 16px}"
+        + "#bwp-pay-loading .bwp-track{height:4px;background:#dce7df;overflow:hidden;border-radius:9px;margin:28px 0}"
+        + "#bwp-pay-loading .bwp-bar{height:100%;width:33%;background:#164d40;animation:bwp-pay-progress 1.8s ease-in-out infinite}"
+        + "#bwp-pay-loading button{margin-top:15px;padding:12px 20px;background:#164d40;border:0;border-radius:10px;color:white;cursor:pointer;font:600 14px system-ui}"
+        + "#bwp-pay-loading button:focus-visible{outline:3px solid #b49027;outline-offset:4px}"
+        + "@keyframes bwp-pay-progress{from{transform:translateX(-100%)}to{transform:translateX(400%)}}"
+        + "@media(max-width:767px){#bwp-pay-loading{display:block}#bwp-pay-loading .bwp-brand{min-height:0;padding:24px}#bwp-pay-loading .bwp-logo{width:88px;height:88px}#bwp-pay-loading .bwp-tagline{font-size:18px;margin:20px 0 0}#bwp-pay-loading .bwp-brand small{display:none}#bwp-pay-loading .bwp-main{padding:32px 24px}#bwp-pay-loading h2{font-size:28px}}"
+        + "@media(prefers-reduced-motion:reduce){#bwp-pay-loading .bwp-bar{animation:none;width:100%;opacity:.45}}";
+      document.head.appendChild(style);
     }
-    notice.textContent = message;
+    focusedElement = document.activeElement;
+    overlay = document.createElement("div");
+    overlay.id = "bwp-pay-loading";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.setAttribute("aria-labelledby", "bwp-pay-loading-title");
+    overlay.tabIndex = -1;
+    // All markup and asset URLs are fixed. No reservation/customer data is interpolated.
+    overlay.innerHTML = '<section class="bwp-brand"><img class="bwp-logo" src="' + PAY_URL + '/roatan-logo.svg" alt="Roatan Self Storage"><div class="bwp-tagline">Un espacio para lo que más te importa.</div><small>ROATÁN · HONDURAS</small></section>'
+      + '<section class="bwp-main"><img class="bwp-bac" src="https://www.baccredomatic.com/themes/custom/bac_theme/images/logo.png" alt="BAC Credomatic"><div role="status" aria-live="polite" aria-atomic="true"><h2 id="bwp-pay-loading-title">Preparando tu pago</h2><p id="bwp-pay-loading-message">Estamos conectando tu reserva con Roatan Self Storage · Pay.</p></div><div class="bwp-track" aria-hidden="true"><div class="bwp-bar"></div></div><p style="font-size:12px;color:#64748b">Podrás revisar los datos y el total antes de confirmar el pago.</p></section>';
+    overlay.addEventListener("keydown", function (event) {
+      if (event.key === "Tab") {
+        event.preventDefault();
+        var button = overlay && overlay.querySelector("button");
+        (button || overlay).focus();
+      }
+    });
+    document.body.appendChild(overlay);
+    overlay.focus();
   }
 
-  function redirectToPay(event) {
+  function failure(code) {
+    busy = false;
+    var text = "No pudimos conectar tu reserva con Pay. Tu reserva no se ha cobrado. Vuelve a intentarlo o contacta a Roatan Self Storage.";
+    if (code === "LOGIN_REQUIRED") text = "Tu sesión de Storeganise terminó. Vuelve a iniciar sesión en Storeganise para continuar. No se inició ningún cobro.";
+    if (code === "BILLING_UNAVAILABLE") text = "El acceso directo a Pay todavía no está disponible para esta reserva. Contacta a Roatan Self Storage. No se inició ningún cobro.";
+    if (!overlay) setLoading();
+    overlay.querySelector("#bwp-pay-loading-title").textContent = "Tu reserva sigue en Storeganise";
+    overlay.querySelector("#bwp-pay-loading-message").textContent = text;
+    overlay.querySelector(".bwp-track").hidden = true;
+    var button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "Volver a mi reserva";
+    button.onclick = function () {
+      if (overlay) overlay.remove();
+      overlay = null;
+      if (focusedElement && typeof focusedElement.focus === "function") focusedElement.focus();
+    };
+    overlay.querySelector(".bwp-main").appendChild(button);
+    button.focus();
+    // Diagnostic code only. Never log URLs containing launch tokens or customer data.
+    var safeCodes = ["LOGIN_REQUIRED", "BILLING_UNAVAILABLE", "RESERVATION_REQUIRED", "INVALID_NATIVE_URL", "INVALID_CHECKOUT_RESPONSE"];
+    console.warn("Roatan Pay: " + (safeCodes.indexOf(code) !== -1 ? code : "STOREGANISE_UNAVAILABLE"));
+  }
+
+  function nativeRequest(url, accept) {
+    var target = new URL(url, STORE_ORIGIN);
+    if (target.origin !== STORE_ORIGIN || target.username || target.password || target.hash) return Promise.reject(new Error("INVALID_NATIVE_URL"));
+    var controller = new AbortController();
+    var timer = window.setTimeout(function () { controller.abort(); }, 25000);
+    return fetch(target.href, { method: "GET", credentials: "same-origin", cache: "no-store",
+      redirect: "error", signal: controller.signal,
+      headers: { Accept: accept, "X-Requested-With": "XMLHttpRequest" }
+    }).then(function (response) {
+      if (!response.ok) {
+        if (response.status === 401) throw new Error("LOGIN_REQUIRED");
+        if (response.status === 403 || response.status === 404 || response.status === 409) throw new Error("BILLING_UNAVAILABLE");
+        throw new Error("STOREGANISE_UNAVAILABLE");
+      }
+      return response.text().then(function (body) {
+        if (body.length > 262144) throw new Error("INVALID_CHECKOUT_RESPONSE");
+        return body;
+      });
+    }).then(function (body) {
+      window.clearTimeout(timer); return body;
+    }, function (error) {
+      window.clearTimeout(timer); throw error;
+    });
+  }
+
+  function payDestination(value) {
+    if (typeof value !== "string" || value.length > 2000) return null;
+    var target;
+    try { target = new URL(value); } catch (ignore) { return null; }
+    if (target.origin !== PAY_URL || target.pathname !== "/" || target.username || target.password || target.hash ||
+      target.searchParams.getAll("session").length !== 1 || !/^[A-Za-z0-9_-]{43}$/.test(target.searchParams.get("session") || "")) return null;
+    return target.href;
+  }
+
+  function resolveResponse(body, canFetchHosted) {
+    var value;
+    try { value = JSON.parse(body); } catch (ignore) {}
+    if (value && typeof value.url === "string") {
+      var destination = payDestination(value.url);
+      if (destination) return Promise.resolve(destination);
+      // Some providers return Storeganise's hosted wrapper, which renders the
+      // signed webhook HTML. Read only that same-origin billing wrapper once.
+      var hosted;
+      try { hosted = new URL(value.url); } catch (ignore) {}
+      if (canFetchHosted && hosted && hosted.origin === STORE_ORIGIN && !hosted.username && !hosted.password &&
+        !hosted.hash && hosted.pathname.indexOf(CHECKOUT_PATH + "/") === 0) {
+        return nativeRequest(hosted.href, "text/html").then(function (html) { return resolveResponse(html, false); });
+      }
+    }
+    if (!value) {
+      // Parse without executing any script or navigating to a guessed URL.
+      var documentValue = new DOMParser().parseFromString(body, "text/html");
+      var meta = documentValue.querySelector('meta[name="pay-checkout-url"]');
+      var result = meta && payDestination(meta.getAttribute("content"));
+      if (result) return Promise.resolve(result);
+    }
+    return Promise.reject(new Error("BILLING_UNAVAILABLE"));
+  }
+
+  function continuePayment(event) {
     if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
     var node = event.target;
     if (node && node.nodeType !== 1) node = node.parentElement;
     var element = node && node.closest ? node.closest("a,button") : null;
     if (!element || element.disabled || element.getAttribute("aria-disabled") === "true") return;
-
     var page = new URL(window.location.href);
     var href = element.getAttribute("data-bwp-original-href") || element.getAttribute("href");
-    var original = null;
+    var original;
     try { if (href) original = new URL(href, STORE_ORIGIN); } catch (ignore) {}
-    var nativeLink = original && original.origin === STORE_ORIGIN &&
+    var nativeLink = original && original.origin === STORE_ORIGIN && !original.username && !original.password &&
       /^\/api\/v1\/billing\/custom\/?$/.test(original.pathname);
-    var text = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-    var bookingBilling = /^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) && page.searchParams.get("step") === "billing";
-    var paymentLabel = /^(añadir un método de pago|agregar un método de pago|add payment method|continuar a métodos de pago|continuar al pago|pagar)$/.test(text);
-    if (!nativeLink && !(bookingBilling && paymentLabel)) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    if (navigating) return;
-
+    var label = (element.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+    var booking = /^\/sites\/[^/]+\/[^/]+\/?$/.test(page.pathname) && page.searchParams.get("step") === "billing";
+    if (!nativeLink && !(booking && /^(añadir un método de pago|agregar un método de pago|add payment method|continuar a métodos de pago|continuar al pago|pagar)$/.test(label))) return;
     var pageOrder = page.searchParams.get("orderId");
     var linkOrder = nativeLink ? original.searchParams.get("orderId") : null;
     var orderId = pageOrder || linkOrder;
+    // Profile add-card buttons without an order keep their native behavior.
+    if (!orderId && !booking) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if (busy) return;
+    busy = true;
+    var currentAttempt = ++attempt;
+    setLoading();
     if (!orderId || !/^[a-f0-9]{24}$/i.test(orderId) ||
       page.searchParams.getAll("orderId").length > 1 ||
       (nativeLink && original.searchParams.getAll("orderId").length > 1) ||
-      (pageOrder && linkOrder && pageOrder !== linkOrder)) {
-      showError(element, "Abra el pago desde la reserva de su bodega para identificar qué desea pagar.");
-      return;
-    }
+      (pageOrder && linkOrder && pageOrder !== linkOrder)) { failure("RESERVATION_REQUIRED"); return; }
 
-    // Pay verifies the customer and obtains the total from Storeganise.
-    // Do not put API keys, customer details or amounts in this tag.
-    var destination = new URL(ENTRY_API);
-    var returnPage = new URL(page.pathname, STORE_ORIGIN);
-    ["orderId", "date", "step", "lang", "_n"].forEach(function (key) {
-      if (page.searchParams.has(key)) returnPage.searchParams.set(key, page.searchParams.get(key));
-    });
-    returnPage.searchParams.set("orderId", orderId);
-    destination.searchParams.set("orderId", orderId);
-    destination.searchParams.set("returnUrl", returnPage.href);
-    navigating = true;
-    window.location.assign(destination.href);
+    nativeRequest(STORE_ORIGIN + "/api/v1/units/orders/" + encodeURIComponent(orderId), "application/json")
+      .then(function (body) {
+        var order = JSON.parse(body);
+        if (!order || order.id !== orderId || !/^[a-f0-9]{24}$/i.test(order.siteId || "")) throw new Error("RESERVATION_REQUIRED");
+        var linkSite = nativeLink ? original.searchParams.get("siteId") : null;
+        if ((linkSite && linkSite !== order.siteId) || (nativeLink && original.searchParams.getAll("siteId").length > 1)) throw new Error("RESERVATION_REQUIRED");
+        var nativeReturn = nativeLink ? original.searchParams.get("returnUrl") : null;
+        var returnPage = nativeReturn ? new URL(nativeReturn, STORE_ORIGIN) : new URL(page.pathname, STORE_ORIGIN);
+        if (returnPage.origin !== STORE_ORIGIN || returnPage.username || returnPage.password ||
+          /^\/(api|admin)(\/|$)/i.test(returnPage.pathname) || returnPage.searchParams.getAll("orderId").length > 1 ||
+          (returnPage.searchParams.get("orderId") && returnPage.searchParams.get("orderId") !== orderId)) throw new Error("RESERVATION_REQUIRED");
+        if (!nativeReturn) ["date", "step", "lang", "_n"].forEach(function (key) {
+          if (page.searchParams.has(key)) returnPage.searchParams.set(key, page.searchParams.get(key));
+        });
+        returnPage.searchParams.set("orderId", orderId);
+        var checkout = new URL(CHECKOUT_PATH, STORE_ORIGIN);
+        checkout.searchParams.set("siteId", order.siteId);
+        checkout.searchParams.set("returnUrl", returnPage.href);
+        // Identity comes from Storeganise's authenticated checkout/webhook, not
+        // from IDs in this tag. The signed returnUrl carries the specific order.
+        return nativeRequest(checkout.href, "application/json");
+      })
+      .then(function (body) { return resolveResponse(body, true); })
+      .then(function (destination) { if (currentAttempt === attempt) window.location.assign(destination); })
+      .catch(function (error) { if (currentAttempt === attempt) failure(error && error.message || "STOREGANISE_UNAVAILABLE"); });
   }
 
-  window.addEventListener("click", redirectToPay, true);
-  window.addEventListener("pageshow", function () { navigating = false; });
+  window.addEventListener("click", continuePayment, true);
+  window.addEventListener("pageshow", function () {
+    attempt++;
+    busy = false;
+    if (overlay) overlay.remove();
+    overlay = null;
+  });
 })();
 </script>

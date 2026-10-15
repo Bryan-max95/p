@@ -70,7 +70,17 @@ Conservar los valores privados de `STOREGANISE_API_KEY`, `PAY_SESSION_TOKEN_SECR
 
 La tabla nueva `pay_storeganise_bridge_grants` se crea mediante el esquema aditivo existente en la primera operación de base de datos. La conexión debe permitir esa migración y usar la base persistente de Pay. No se ejecutó una migración contra la base real durante este cambio.
 
-**Entornos:** la comprobación existente exige Storeganise `.com` con banco en producción y `.dev` con sandbox. No se cambiaron esos valores. Si se conserva banco sandbox con esta cuenta `.com`, se devolverá `STOREGANISE_SANDBOX_INSTANCE_REQUIRED`; no quitar esa protección para registrar pagos ficticios en bodegas reales. El script incluido admite los dos dominios reales indicados por el comercio, no otra instancia `.dev`.
+**Configuración elegida: producción.** Para la cuenta real indicada arriba, configurar en Vercel:
+
+```dotenv
+CYBERSOURCE_ENVIRONMENT=production
+PAY_DEMO_ENABLED=false
+PAY_SANDBOX_MANUAL_ENABLED=false
+```
+
+`Production and Preview` es el ámbito de Vercel, no el valor de `CYBERSOURCE_ENVIRONMENT`. Esta última debe contener exactamente `production`. El código selecciona entonces `api.cybersource.com`, Flex y 3DS de producción. Conservar las credenciales BAC aprobadas; no hay credenciales nuevas en esta plantilla. Guardar las variables y crear un nuevo despliegue de producción.
+
+El error `STOREGANISE_SANDBOX_INSTANCE_REQUIRED` se produce si el despliegue sigue leyendo `sandbox` (o la variable está ausente y usa ese valor por defecto) junto con Storeganise `.com`. No se soluciona cambiando el script ni eliminando esa validación. La alternativa sandbox con `.dev` no es la configuración elegida. Actualizar `.env.local` o subir código a GitHub no cambia las variables guardadas en Vercel.
 
 Redesplegar tras cambiar variables. Confirmar que el dominio de Pay apunta a ese despliegue y que su protección de Vercel no exige un login adicional para `/api/storeganise/bridge`. Conservar el webhook y la reconciliación existentes.
 

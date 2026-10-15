@@ -75,12 +75,11 @@ La tabla nueva `pay_storeganise_bridge_grants` se crea mediante el esquema aditi
 ```dotenv
 CYBERSOURCE_ENVIRONMENT=sandbox
 STOREGANISE_LIVE_SANDBOX_ENABLED=true
-STOREGANISE_TEST_CUSTOMER_IDS=ID_REAL_DEL_CLIENTE_AUTORIZADO_PARA_PRUEBAS
 PAY_DEMO_ENABLED=false
 PAY_SANDBOX_MANUAL_ENABLED=false
 ```
 
-Reemplazar `ID_REAL_DEL_CLIENTE_AUTORIZADO_PARA_PRUEBAS` por el ID de 24 caracteres del usuario en Storeganise (se encuentra en la URL de su ficha en Administración → Usuarios). Para varios clientes, separar sus IDs por comas. Conservar los IDs existentes que se sigan necesitando. No usar correo, ID de reserva ni un comodín. El bridge rechaza otros usuarios antes de escribir su campo de acceso temporal. Las claves CyberSource configuradas deben tener acceso al entorno sandbox; una respuesta 401 requiere revisar esas credenciales.
+Todos los clientes autenticados de la instancia real pueden acceder con su propia reserva, sin añadir IDs a `STOREGANISE_TEST_CUSTOMER_IDS`. Esa variable solo aplica a la instancia aislada `.dev` y a los formularios manuales/de demostración. La comprobación de identidad y propiedad de la reserva sigue siendo obligatoria. Las claves CyberSource configuradas deben tener acceso al entorno sandbox; una respuesta 401 requiere revisar esas credenciales.
 
 `Production and Preview` es el ámbito de Vercel, no el entorno bancario. El código selecciona `apitest.cybersource.com`, Flex y 3DS sandbox cuando `CYBERSOURCE_ENVIRONMENT=sandbox`, aunque Vercel sea un despliegue Production. Mantener `STOREGANISE_API_URL=https://roatanselfstorage.storeganise.com/api/v1/admin` y las claves actuales de Storeganise. No se necesita cambiar el script GTM, los webhooks ni el campo `pay_checkout_bridge` que ya funcionan.
 
@@ -88,7 +87,9 @@ Esta modalidad conserva la autenticación del cliente, el monto USD y la convers
 
 Una aprobación sandbox se guarda en Pay como prueba: no se publica en el libro de pagos real de Storeganise, no completa pasos de ocupación, no activa bodegas y no dispara desde Pay una notificación de pago al portal fiscal. Esto se aplica también a reintentos/reconciliación y a sesiones sandbox antiguas después de volver a producción. El carrusel muestra el resultado de prueba sin esperar activación ni redirigir automáticamente como si la bodega estuviera habilitada.
 
-El error `STOREGANISE_SANDBOX_INSTANCE_REQUIRED` significa que falta habilitar `STOREGANISE_LIVE_SANDBOX_ENABLED=true` para esta combinación. `STOREGANISE_SANDBOX_CUSTOMER_NOT_ALLOWED` indica que falta el ID del usuario en la lista autorizada. Para pagos reales posteriores, usar `CYBERSOURCE_ENVIRONMENT=production`, desactivar `STOREGANISE_LIVE_SANDBOX_ENABLED` y configurar credenciales con acceso a producción. Las pruebas no se convierten en pagos reales; abrir una sesión nueva desde Storeganise después de cada cambio de entorno. Actualizar `.env.local` o GitHub no modifica las variables de Vercel.
+Después de una aprobación aparece **Repetir prueba con otra tarjeta**. Esa acción vuelve a comprobar la reserva y su total, archiva el comprobante anterior y abre de nuevo el formulario. Conserva todos los intentos y no realiza un cobro por sí misma. Puede repetirse sin un límite total de pruebas; los controles de concurrencia y frecuencia siguen vigentes. No reinicia intentos pendientes, inciertos ni pagos de producción.
+
+El error `STOREGANISE_SANDBOX_INSTANCE_REQUIRED` significa que falta habilitar `STOREGANISE_LIVE_SANDBOX_ENABLED=true` para esta combinación. `STOREGANISE_SANDBOX_CUSTOMER_NOT_ALLOWED` solo corresponde a la lista de la instancia aislada `.dev`; si aparece en este flujo real, verificar que Vercel ejecuta la última versión. Para pagos reales posteriores, usar `CYBERSOURCE_ENVIRONMENT=production`, desactivar `STOREGANISE_LIVE_SANDBOX_ENABLED` y configurar credenciales con acceso a producción. Las pruebas no se convierten en pagos reales; abrir una sesión nueva desde Storeganise después de cada cambio de entorno. Actualizar `.env.local` o GitHub no modifica las variables de Vercel.
 
 Redesplegar tras cambiar variables. Confirmar que el dominio de Pay apunta a ese despliegue y que su protección de Vercel no exige un login adicional para `/api/storeganise/bridge`. Conservar el webhook y la reconciliación existentes.
 
@@ -144,7 +145,7 @@ Después de un cobro confirmado, el proceso existente **servidor Pay → Storega
 | `STOREGANISE_BRIDGE_ACCESS_EXPIRED` / `USED` | Volver a la reserva y abrir un nuevo acceso. |
 | `STOREGANISE_IDENTITY_MISMATCH` / `ACCESS_INVALID` | Usuario, reserva o acceso no corresponden. |
 | `STOREGANISE_SANDBOX_INSTANCE_REQUIRED` | Banco sandbox con cuenta `.com` sin `STOREGANISE_LIVE_SANDBOX_ENABLED=true`. |
-| `STOREGANISE_SANDBOX_CUSTOMER_NOT_ALLOWED` | Falta el ID del usuario en `STOREGANISE_TEST_CUSTOMER_IDS`. |
+| `STOREGANISE_SANDBOX_CUSTOMER_NOT_ALLOWED` | Falta el ID en la lista de la instancia aislada `.dev`. Storeganise real con sandbox habilitado no requiere esa lista. |
 | `STOREGANISE_RESERVATION_PENDING` | Falta registro interno confirmado; no se autoriza el cargo. |
 | `USER_HTTP_429` / `BRIDGE_HTTP_429` | Respetar Retry-After; no hay reintentos automáticos. |
 

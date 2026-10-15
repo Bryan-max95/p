@@ -29,8 +29,8 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
   if (environment === 'production' && (input.isTest || input.isDemo || input.fiscalEnvironment !== 'production')) throw new Error('Production does not accept test checkouts');
   if (!money(input.amount) || !['USD', 'HNL'].includes(input.currency)) throw new Error('Invalid definitive amount');
   const allowed = new Set((process.env.STOREGANISE_TEST_CUSTOMER_IDS ?? '').split(',').map(v => v.trim()).filter(Boolean));
-  if (environment === 'sandbox' && !allowed.has(input.customerId)) throw new Error('Customer is not allowlisted for sandbox');
   const liveSandbox = isLiveStoreganiseSandbox({ environment, storeganise_context: input.storeganiseContext });
+  if (environment === 'sandbox' && !liveSandbox && !allowed.has(input.customerId)) throw new Error('Customer is not allowlisted for sandbox');
   if (liveSandbox) {
     const config = assertStoreganiseEnabled();
     if (source !== 'storeganise' || input.storeganiseContext?.apiOrigin !== config.url.origin ||

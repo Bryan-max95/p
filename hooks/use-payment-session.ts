@@ -91,6 +91,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
   const [requestError, setRequestError] = useState<string | null>(null);
   const [preparingManual, setPreparingManual] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [repeatError, setRepeatError] = useState(false);
   const manualInFlight = useRef(false);
   const inFlight = useRef(false);
   const initialRequest = useRef<Promise<PaymentResponse | null> | null>(null);
@@ -244,7 +245,25 @@ export function usePaymentSession(manualSandboxEnabled = false) {
 
   return {
     session, loading, error, pending, authentication, localDemoUnavailable, exchangeRateUnavailable,
-    requestError, preparingManual, manualError, startManual,
+    requestError, preparingManual, manualError, startManual, repeatError,
+    repeatSandbox: async () => {
+      if (inFlight.current || session?.storeganise?.status !== 'sandbox_only' || !session.receipt) return false;
+      inFlight.current = true; setSubmitting(true); setRepeatError(false);
+      try {
+        const result = acceptResponse(await paymentRequest<PaymentResponse>('/api/pay/sandbox-repeat', { transactionId: session.receipt.transactionId }));
+        transientToken.current = null;
+        return result.session.status === 'open';
+      } catch {
+        // This operation never charges a card. Recover a successful reset if its
+        // response was lost, without submitting another reset or a bank request.
+        try {
+          const current = await refresh();
+          if (current.session.status === 'open') { transientToken.current = null; return true; }
+        } catch { /* Keep the receipt and the retry button available. */ }
+        setRepeatError(true);
+        return false;
+      } finally { inFlight.current = false; setSubmitting(false); }
+    },
     busy: submitting || session?.status === 'processing' || Boolean(authentication),
     requiresReview: uncertain || ['unknown', 'reconciling'].includes(session?.status ?? ''),
     interruptedAuthentication: session?.authenticationPending && !authentication,

@@ -2,7 +2,7 @@
 
 Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Muestra el saldo en USD, calcula el cargo en HNL con la tasa BCH y guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
 
-Actualización del código: 15 de octubre de 2026. Pay admite temporalmente datos de Storeganise real con CyberSource sandbox mediante `STOREGANISE_LIVE_SANDBOX_ENABLED=true` y una lista de clientes de prueba autorizados. Conserva la identificación y el total, permite escribir la tarjeta en Microform y muestra el resultado como prueba, sin registrar pagos reales ni activar bodegas. Ver [configuración de Vercel](CONEXION_GTM_STOREGANISE.md#3-vercel-y-base-de-datos).
+Actualización del código: 15 de octubre de 2026. Pay admite temporalmente datos de Storeganise real con CyberSource sandbox mediante `STOREGANISE_LIVE_SANDBOX_ENABLED=true`, para todos los clientes autenticados sin una lista de IDs. Conserva la identificación y el total, permite escribir la tarjeta en Microform y repetir una prueba aprobada conservando su historial. Muestra el resultado como prueba, sin registrar pagos reales ni activar bodegas. Ver [configuración de Vercel](CONEXION_GTM_STOREGANISE.md#3-vercel-y-base-de-datos).
 
 Se verificó el cambio con comprobaciones locales de TypeScript, ESLint y servicios simulados. No se iniciaron el servidor ni transacciones bancarias, ni se modificaron las cuentas externas. Las credenciales y el despliegue deben verificarse con la prueba manual del operador.
 

@@ -1,6 +1,6 @@
 ﻿# Publicar Pay en GitHub y Vercel
 
-Actualización del 15 de octubre de 2026: se admite Storeganise real con CyberSource sandbox, mediante habilitación explícita y clientes autorizados. Verificado localmente con servicios simulados, TypeScript y ESLint; sin iniciar el servidor ni realizar operaciones bancarias.
+Actualización del 15 de octubre de 2026: se admite Storeganise real con CyberSource sandbox, mediante habilitación explícita para todos los clientes autenticados, sin lista de IDs. Las pruebas aprobadas se pueden repetir conservando el historial. Verificado localmente con servicios simulados, TypeScript y ESLint; sin iniciar el servidor ni realizar operaciones bancarias.
 
 ## GitHub
 
@@ -31,7 +31,6 @@ Para conservar el acceso actual desde Storeganise real y probar con CyberSource 
 ```dotenv
 CYBERSOURCE_ENVIRONMENT=sandbox
 STOREGANISE_LIVE_SANDBOX_ENABLED=true
-STOREGANISE_TEST_CUSTOMER_IDS=ID_REAL_DEL_CLIENTE_AUTORIZADO_PARA_PRUEBAS
 STOREGANISE_PAY_ENABLED=true
 STOREGANISE_BRIDGE_ENABLED=true
 STOREGANISE_API_URL=https://roatanselfstorage.storeganise.com/api/v1/admin
@@ -39,7 +38,7 @@ PAY_SANDBOX_MANUAL_ENABLED=false
 PAY_DEMO_ENABLED=false
 ```
 
-Reemplazar el ID por el identificador de 24 caracteres del usuario en Storeganise; para varios usuarios, separarlos con comas. La tarjeta sigue siendo de entrada manual: `PAY_SANDBOX_MANUAL_ENABLED` controla el formulario de importes de prueba, no los campos de tarjeta. Mantener las credenciales de Storeganise y usar credenciales CyberSource válidas para sandbox. Guardar las variables en el ámbito Production de Vercel, redesplegar y volver a abrir Pay desde Storeganise para obtener una sesión sandbox nueva. No cambiar GTM. La aprobación se guarda en Pay sin registrar un pago real en Storeganise, activar bodegas ni emitir una factura fiscal por ese pago de prueba.
+No es necesario añadir clientes a `STOREGANISE_TEST_CUSTOMER_IDS` para este flujo con Storeganise real. La tarjeta sigue siendo de entrada manual: `PAY_SANDBOX_MANUAL_ENABLED` controla el formulario de importes de prueba, no los campos de tarjeta. Mantener las credenciales de Storeganise y usar credenciales CyberSource válidas para sandbox. Guardar las variables en el ámbito Production de Vercel, redesplegar y volver a abrir Pay desde Storeganise para obtener una sesión sandbox nueva. No cambiar GTM. La aprobación se guarda en Pay sin registrar un pago real en Storeganise, activar bodegas ni emitir una factura fiscal por ese pago de prueba. El botón **Repetir prueba con otra tarjeta** permite volver al formulario después de una aprobación y conserva el historial anterior.
 
 Para el formulario manual de sandbox:
 

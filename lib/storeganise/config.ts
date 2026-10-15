@@ -22,6 +22,9 @@ export function assertStoreganiseEnabled() {
 
 export function assertStoreganiseTestCustomer(customerId: string) {
   if (gatewayEnvironment() !== 'sandbox') return;
+  // The live account keeps all of its customers. Identity/ownership is checked
+  // by the bridge and checkout; a test-user list is only for the .dev instance.
+  if (assertStoreganiseEnabled().liveSandbox) return;
   const allowed = (process.env.STOREGANISE_TEST_CUSTOMER_IDS ?? '').split(',').map(value => value.trim());
   if (!allowed.includes(customerId)) {
     throw new StoreganiseIntegrationError('STOREGANISE_SANDBOX_CUSTOMER_NOT_ALLOWED', 403);

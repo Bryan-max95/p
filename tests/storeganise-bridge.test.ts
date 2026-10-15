@@ -8,6 +8,7 @@ import { prepareProfileBridge, redeemProfileBridge } from '../lib/storeganise/br
 import { prepareReservationForPayment } from '../lib/storeganise/reservation';
 import { verifyStoreganiseCheckout } from '../lib/storeganise/checkout';
 import { publicSession } from '../lib/pay/service';
+import { repeatSandboxPayment } from '../lib/pay/repeat-sandbox';
 import { OPTIONS, POST } from '../app/api/storeganise/bridge/route';
 import type { SessionRow } from '../lib/pay/types';
 
@@ -22,7 +23,7 @@ const nonce = () => crypto.randomBytes(32).toString('base64url');
 
 /** All provider and DB boundaries are in memory. No live customers, credentials,
  * invoices, payments or database migrations are accessed by these tests. */
-function fixture(t: TestContext) {
+function fixture(t: TestContext, customer = owner) {
   const env = { DATABASE_URL: 'postgresql://test:test@127.0.0.1:1/unused', BCH_API_KEY: 'unit-test-only',
     CYBERSOURCE_ENVIRONMENT: 'production', CYBERSOURCE_MERCHANT_ID: 'unit-test-merchant',
     CYBERSOURCE_KEY_ID: crypto.randomUUID(), CYBERSOURCE_SHARED_SECRET: Buffer.alloc(32, 8).toString('base64'),
@@ -35,8 +36,9 @@ function fixture(t: TestContext) {
   const grants = new Map<string, BridgeGrant>();
   const sessions = new Map<string, SessionRow>();
   const deliveries: Record<string, unknown>[] = [];
+  const audit: Array<{ subjectId: string; receipt: Record<string, unknown> }> = [];
   const requests: Array<{ path: string; method: string }> = [];
-  const state = { owner, invoice: false, total: 199, disabled: false, orderState: 'notSubmitted', field: { ...field },
+  const state = { owner: customer, invoice: false, total: 199, disabled: false, orderState: 'notSubmitted', field: { ...field },
     customFields: { unrelated: 'preserve me' } as Record<string, unknown>, providerStatus: 200, attempts: 0, releaseCalls: 0 };
   const runQuery = async (sql: string, values: unknown[] = []) => {
     let rows: unknown[] = [];
@@ -65,6 +67,16 @@ function fixture(t: TestContext) {
     } else if (sql.startsWith('SELECT * FROM pay_sessions WHERE event_id=')) rows = [...sessions.values()].filter(s => s.event_id === values[0]);
     else if (sql.startsWith('SELECT * FROM pay_sessions WHERE environment=')) rows = [...sessions.values()].filter(s => s.environment === values[0] && (s.invoice_id === values[1] || s.event_id === values[2]));
     else if (sql.startsWith('SELECT * FROM pay_sessions WHERE id=')) rows = sessions.has(String(values[0])) ? [sessions.get(String(values[0]))!] : [];
+    else if (sql.startsWith('SELECT id FROM pay_audit_events')) rows = audit.filter(a => a.subjectId === values[0] && a.receipt.transactionId === values[1]).map(() => ({ id: 1 }));
+    else if (sql.startsWith('INSERT INTO pay_audit_events')) audit.push({ subjectId: String(values[0]), receipt: JSON.parse(String(values[1])) });
+    else if (sql.startsWith("UPDATE pay_sessions SET status='open',capture_context=NULL")) {
+      const current = sessions.get(String(values[0]))!;
+      Object.assign(current, { status: 'open', capture_context: undefined, gateway_transaction_id: undefined,
+        authorization_code: undefined, card_brand: undefined, card_last4: undefined, gateway_status: undefined,
+        failure_reason: undefined, paid_at: undefined, storeganise_status: 'sandbox_only', portal_status: 'disabled',
+        storeganise_payment_id: null, storeganise_error: null, expires_at: new Date(Date.now() + 1800000) });
+      rows = [current];
+    }
     else if (sql.startsWith('SELECT id FROM pay_sessions')) rows = [];
     else if (sql.startsWith('INSERT INTO pay_sessions')) {
       const s = { id: String(values[0]), event_id: String(values[1]), customer_id: String(values[3]), order_id: values[4], invoice_id: values[5],
@@ -94,15 +106,15 @@ function fixture(t: TestContext) {
       result: { siteId, unitTypeId: typeId, startDate: '2026-10-30', orderState: state.orderState,
         ...(state.invoice ? { invoiceId, unitRentalId: rentalId, unitId } : {}) } };
     else if (path === `/jobs/${orderId}/operations/previewInvoice` && method === 'POST') body = { total: state.total };
-    else if (path === `/users/${owner}` && method === 'GET') body = { id: owner, firstName: 'Test', lastName: 'Customer', email: 'customer@example.test', isDisabled: state.disabled, customFields: state.customFields };
-    else if (path === `/users/${owner}` && method === 'PUT') {
+    else if (path === `/users/${customer}` && method === 'GET') body = { id: customer, firstName: 'Test', lastName: 'Customer', email: 'customer@example.test', isDisabled: state.disabled, customFields: state.customFields };
+    else if (path === `/users/${customer}` && method === 'PUT') {
       const update = JSON.parse(String(init?.body)); deliveries.push(update);
       Object.assign(state.customFields, update.customFields); body = {};
     } else if (path === '/settings') body = { currencyCode: 'USD', manualPaymentMethods: [{ code: 'card' }], userCustomFields: [state.field] };
     else if (path === `/unit-types/${typeId}`) body = { id: typeId, title: { en: 'Hallway Medium' } };
-    else if (path === `/invoices/${invoiceId}`) body = { id: invoiceId, owner: { id: owner }, unitRentalId: rentalId, siteId, state: 'sent', balance: state.total, total: state.total, currency: 'USD', payments: [] };
-    else if (path === `/unit-rentals/${rentalId}`) body = { id: rentalId, ownerId: owner, siteId, unitId, state: 'active', moveInJobId: orderId };
-    else if (path === `/units/${unitId}`) body = { id: unitId, siteId, name: 'H-01', state: 'reserved', ownerId: owner, rentalId };
+    else if (path === `/invoices/${invoiceId}`) body = { id: invoiceId, owner: { id: customer }, unitRentalId: rentalId, siteId, state: 'sent', balance: state.total, total: state.total, currency: 'USD', payments: [] };
+    else if (path === `/unit-rentals/${rentalId}`) body = { id: rentalId, ownerId: customer, siteId, unitId, state: 'active', moveInJobId: orderId };
+    else if (path === `/units/${unitId}`) body = { id: unitId, siteId, name: 'H-01', state: 'reserved', ownerId: customer, rentalId };
     else throw new Error(`Unexpected provider call: ${method} ${path}`);
     return Response.json(body);
   });
@@ -115,7 +127,7 @@ function fixture(t: TestContext) {
     return { operation: 'redeem' as const, grantId: grant.id as string, token: grant.token as string,
       clientNonce: nonce(), orderId, returnUrl: `${booking}/sites/roatan/h-medium?orderId=${orderId}&step=billing` };
   };
-  return { state, grants, sessions, requests, deliveries, deliveredInput };
+  return { state, grants, sessions, requests, deliveries, audit, deliveredInput };
 }
 
 test('bridge field must be unique, readable and not editable by the customer', () => {
@@ -276,23 +288,47 @@ test('live sandbox opens the authenticated draft with USD/HNL totals and revalid
   await assert.rejects(verifyStoreganiseCheckout(session), /INSTANCE_ENVIRONMENT_MISMATCH/);
 });
 
-test('sandbox allowlist is enforced before grants and again on redemption and payment', async t => {
+test('all authenticated live customers can open and verify sandbox payments without a test ID list', async t => {
+  for (const customer of [owner, other]) await t.test(customer, async st => {
+    const f = fixture(st, customer);
+    process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
+    process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
+    process.env.STOREGANISE_TEST_CUSTOMER_IDS = '';
+    await prepareProfileBridge({ operation: 'prepare', userId: customer, orderId });
+    await redeemProfileBridge(f.deliveredInput(), booking);
+    const session = [...f.sessions.values()][0];
+    assert.equal(session.customer_id, customer);
+    process.env.STOREGANISE_TEST_CUSTOMER_IDS = 'unrelated-customer';
+    await verifyStoreganiseCheckout(session);
+    await assert.rejects(prepareProfileBridge({ operation: 'prepare', userId: customer === owner ? other : owner, orderId }), /ACCESS_INVALID/);
+  });
+});
+
+test('successful live sandbox tests can be repeated without deleting history or resetting a newer attempt', async t => {
   const f = fixture(t);
   process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
   process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
-  process.env.STOREGANISE_TEST_CUSTOMER_IDS = other;
-  await assert.rejects(prepareProfileBridge({ operation: 'prepare', userId: owner, orderId }), /SANDBOX_CUSTOMER_NOT_ALLOWED/);
-  assert.equal(f.requests.length, 0); assert.equal(f.deliveries.length, 0);
-  process.env.STOREGANISE_TEST_CUSTOMER_IDS = owner;
+  process.env.STOREGANISE_TEST_CUSTOMER_IDS = '';
   await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
-  const input = f.deliveredInput();
-  process.env.STOREGANISE_TEST_CUSTOMER_IDS = other;
-  await assert.rejects(redeemProfileBridge(input, booking), /SANDBOX_CUSTOMER_NOT_ALLOWED/);
-  process.env.STOREGANISE_TEST_CUSTOMER_IDS = owner;
-  await redeemProfileBridge(input, booking);
+  await redeemProfileBridge(f.deliveredInput(), booking);
   const session = [...f.sessions.values()][0];
-  process.env.STOREGANISE_TEST_CUSTOMER_IDS = other;
-  await assert.rejects(verifyStoreganiseCheckout(session), /SANDBOX_CUSTOMER_NOT_ALLOWED/);
+  await assert.rejects(repeatSandboxPayment(session, 'unknown-transaction'), /REPEAT_NOT_AVAILABLE/);
+  for (let i = 0; i < 3; i++) {
+    Object.assign(session, { status: 'succeeded', gateway_transaction_id: `sandbox-${i}`, paid_at: new Date(), capture_context: 'old-context' });
+    const snapshot = structuredClone(session);
+    const next = await repeatSandboxPayment(snapshot, `sandbox-${i}`);
+    assert.equal(next.status, 'open'); assert.equal(next.capture_context, undefined);
+    assert.equal(next.gateway_transaction_id, undefined); assert.equal(next.customer_id, owner);
+    assert.equal(next.amount, '5273.50'); assert.equal(next.reference_usd_amount, '199.00');
+    assert.equal(f.audit.length, i + 1); assert.equal(f.audit[i].receipt.transactionId, `sandbox-${i}`);
+    assert.equal(f.audit[i].receipt.amount, '5273.50');
+    session.status = 'processing'; // Another tab has already started the next test.
+    const replay = await repeatSandboxPayment(structuredClone(session), `sandbox-${i}`);
+    assert.equal(replay.status, 'processing'); assert.equal(f.audit.length, i + 1);
+  }
+  assert.equal(f.requests.some(r => /payments|steps|submit/.test(r.path)), false);
+  process.env.CYBERSOURCE_ENVIRONMENT = 'production';
+  await assert.rejects(repeatSandboxPayment(session, 'sandbox-2'), /REPEAT_DISABLED/);
 });
 
 test('sandbox can verify an existing live invoice but still reports a test-only session', async t => {

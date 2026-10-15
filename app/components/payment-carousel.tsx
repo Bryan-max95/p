@@ -250,6 +250,12 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
     }catch{setCardError('CARD_DETAILS_INVALID');}finally{tokenizingRef.current=false;setTokenizing(false);}
   };
 
+  const handleRepeatSandbox = async () => {
+    if (!await payment.repeatSandbox()) return;
+    setCardHolder(''); setExpDate(''); setDetectedBrand('default');
+    setFieldsReady(false); setCardError(null); setCurrentStep(1);
+  };
+
   // Reset Carousel to Start a New Payment
   const handleReset = () => {
     window.sessionStorage.removeItem('pay-session-id');
@@ -981,6 +987,15 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                 </div>
 
                 {/* Botones de acción final */}
+                {liveSandbox && <div className="space-y-2">
+                  <button type="button" onClick={() => void handleRepeatSandbox()} disabled={isProcessing}
+                    className="w-full py-3.5 rounded-xl bg-[#1F5C4F] hover:bg-[#17483e] text-white font-bold text-sm disabled:opacity-50">
+                    {isProcessing ? (lang === 'es' ? 'Preparando prueba…' : 'Preparing test…') : (lang === 'es' ? 'Repetir prueba con otra tarjeta' : 'Repeat test with another card')}
+                  </button>
+                  {payment.repeatError && <p role="alert" className="text-sm text-red-700">
+                    {lang === 'es' ? 'No se pudo preparar otra prueba. Vuelva a intentarlo o regrese a Storeganise para revisar su reserva. No se inició ningún cobro.' : 'Could not prepare another test. Try again or return to Storeganise to review your booking. No charge was started.'}
+                  </p>}
+                </div>}
                 <div className="flex flex-col sm:flex-row gap-3 pt-2">
                   <button
                     type="button"

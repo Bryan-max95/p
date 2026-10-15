@@ -59,6 +59,14 @@ export async function openReservationCheckout(value: unknown) {
  * An account ID, email or Origin header is not proof of identity.
  */
 export async function openSignedReservationCheckout(value: unknown) {
+  return openVerifiedReservationCheckout(value, 'signed-checkout');
+}
+
+/** Server-only entry. The caller must authenticate a Storeganise signature or a
+ * scoped grant delivered through the owner's private Storeganise profile first.
+ * Never call this with an unsigned browser userId/orderId pair.
+ */
+export async function openVerifiedReservationCheckout(value: unknown, authentication: 'signed-checkout' | 'profile-bridge') {
   const input = reservationInput.extend({ userId: sgId, siteId: sgId.optional() }).parse(value);
   const config = assertStoreganiseEnabled();
   const job = await getJob(input.orderId);
@@ -73,11 +81,12 @@ export async function openSignedReservationCheckout(value: unknown) {
   const preview = z.object({ total: z.number().finite() }).passthrough().parse(
     await storeganiseRequest(`/jobs/${job.id}/operations/previewInvoice`, 'POST'));
   const order = orderSchema.parse({ ...job.result, id: job.id, invoicePreview: preview });
-  return openReservationForContext(input, { ...config, job, order, customerId: input.userId });
+  return openReservationForContext(input, { ...config, job, order, customerId: input.userId }, undefined, authentication);
 }
 
 async function openReservationForContext(input: z.infer<typeof reservationInput>,
-  context: Awaited<ReturnType<typeof readReservation>>, token?: string) {
+  context: Awaited<ReturnType<typeof readReservation>>, token?: string,
+  authentication: 'signed-checkout' | 'profile-bridge' = 'signed-checkout') {
   const { order, job, customerId, environment, url } = context;
   if (job.result.invoiceId) return openStoreganiseCheckout({ userId: customerId, orderId: job.id, returnUrl: input.returnUrl });
   if (!order.invoicePreview) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_TOTAL_UNAVAILABLE');
@@ -110,7 +119,7 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
   };
   const binding: StoreganiseContext = { kind: 'reservation', apiOrigin: url.origin, customerId,
     jobId: job.id, siteId: order.siteId, unitId: selectionId, unitTypeId: order.unitTypeId,
-    reservationAuthentication: token ? 'customer-token' : 'signed-checkout',
+    reservationAuthentication: token ? 'customer-token' : authentication,
     ...(unit ? { selectedUnitId: unit.id } : {}) };
   const returnUrl = storeganiseReturnUrl(input.returnUrl);
   const rate = await currentBchRate();
@@ -123,8 +132,8 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
       const existingBinding = session.storeganise_context;
       if (!existingBinding || session.customer_id !== customerId || existingBinding.apiOrigin !== url.origin ||
         existingBinding.jobId !== job.id) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-      if (existingBinding.reservationAuthentication === 'signed-checkout') {
-        binding.reservationAuthentication = 'signed-checkout';
+      if (existingBinding.reservationAuthentication === 'signed-checkout' || existingBinding.reservationAuthentication === 'profile-bridge') {
+        binding.reservationAuthentication = existingBinding.reservationAuthentication;
       }
       if (existingBinding.kind === 'reservation' && ['open', 'declined'].includes(session.status) && !needsLegacyPaymentReview(session)) {
         // Never change a quote that is already authenticating/processing or paid.
@@ -139,10 +148,10 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
         }
         // Replace the legacy cookie dependency only after a verified handoff,
         // preserving the current quote when the reservation has not changed.
-        if (!token && session.storeganise_context?.reservationAuthentication !== 'signed-checkout') {
+        if (!token && !['signed-checkout', 'profile-bridge'].includes(session.storeganise_context?.reservationAuthentication ?? '')) {
           session = (await client.query<SessionRow>(`UPDATE pay_sessions
-            SET storeganise_context=storeganise_context || '{"reservationAuthentication":"signed-checkout"}'::jsonb,
-              updated_at=now() WHERE id=$1 RETURNING *`, [session.id])).rows[0];
+            SET storeganise_context=storeganise_context || $2::jsonb,
+              updated_at=now() WHERE id=$1 RETURNING *`, [session.id, JSON.stringify({ reservationAuthentication: authentication })])).rows[0];
         }
       }
     } else {
@@ -173,7 +182,7 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
 export async function prepareReservationForPayment(session: SessionRow) {
   const binding = session.storeganise_context;
   if (binding?.kind !== 'reservation' || !binding.jobId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-  if (binding.reservationAuthentication === 'signed-checkout') {
+  if (binding.reservationAuthentication === 'signed-checkout' || binding.reservationAuthentication === 'profile-bridge') {
     const { url, environment } = assertStoreganiseEnabled();
     const job = await getJob(binding.jobId);
     if (url.origin !== binding.apiOrigin || environment !== session.environment ||

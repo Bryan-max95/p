@@ -94,7 +94,7 @@ export function publicSession(row: SessionRow) {
     ...(['declined', 'unknown'].includes(status) ? { failureCode: legacyReview ? 'PAYMENT_NOT_CONFIRMED' : paymentFailureCode(row.failure_reason, row.gateway_status) } : {}),
     ...(row.storeganise_context ? {
       requiresReservationConfirmation: row.storeganise_context.kind === 'reservation' &&
-        row.storeganise_context.reservationAuthentication !== 'signed-checkout',
+        !['signed-checkout','profile-bridge'].includes(row.storeganise_context.reservationAuthentication ?? ''),
       storeganise: { status: row.storeganise_status ?? 'waiting_payment', paymentId: row.storeganise_payment_id ?? undefined,
         returnUrl: storeganiseReturnUrl(row.return_url) },
       billingRequired: !billToSchema.safeParse(row.bill_to).success,

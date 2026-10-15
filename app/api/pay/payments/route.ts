@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     if (!body.success || !session.capture_context) return NextResponse.json({ error: 'INVALID_PAYMENT_DATA' }, { status: 400 });
     const data = body.data;
     if (session.storeganise_context?.kind === 'reservation' &&
-      session.storeganise_context.reservationAuthentication !== 'signed-checkout' && data.confirmReservation !== true) {
+      !['signed-checkout','profile-bridge'].includes(session.storeganise_context.reservationAuthentication ?? '') && data.confirmReservation !== true) {
       return NextResponse.json({error:'STOREGANISE_RESERVATION_CONFIRMATION_REQUIRED'},{status:400});
     }
     if (session.storeganise_context && !billToSchema.safeParse(data.billingDetails ?? session.bill_to).success) {

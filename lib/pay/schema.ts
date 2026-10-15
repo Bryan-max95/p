@@ -85,4 +85,11 @@ CREATE TABLE IF NOT EXISTS pay_customer_login_limits (
   key_hash text PRIMARY KEY, attempts integer NOT NULL, expires_at timestamptz NOT NULL
 );
 CREATE INDEX IF NOT EXISTS pay_customer_login_expiry ON pay_customer_login_limits(expires_at);
+CREATE TABLE IF NOT EXISTS pay_storeganise_bridge_grants (
+  id uuid PRIMARY KEY, token_hash text UNIQUE NOT NULL, customer_id text NOT NULL, order_id text NOT NULL,
+  api_origin text NOT NULL, environment text NOT NULL CHECK(environment IN ('sandbox','production')),
+  expires_at timestamptz NOT NULL, client_hash text, lease_token uuid, lease_until timestamptz,
+  session_id uuid REFERENCES pay_sessions(id), created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pay_bridge_customer ON pay_storeganise_bridge_grants(api_origin,customer_id,expires_at);
 `;

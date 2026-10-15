@@ -1,28 +1,24 @@
-# Solicitud de configuración a Storeganise
+# Consultas técnicas pendientes para Storeganise
 
-Asunto: Habilitar acceso autenticado de reservas a nuestro checkout Pay
+Este mensaje no se ha enviado. La nueva etiqueta V8 ya no usa `/api/v1/billing/custom`; estas consultas corresponden al canal privado y a la confirmación de reservas.
+
+**Asunto: Validación de acceso privado y confirmación de reservas para Pay**
 
 Hola, equipo de Storeganise:
 
-Necesitamos conectar el portal de clientes de Roatan Self Storage con nuestro checkout de pago puntual en https://www.payroatanselfstorage.com. El cliente ya inicia sesión en Storeganise y debe llegar a Pay con su reserva identificada, sin volver a escribir sus credenciales.
+Estamos integrando nuestros portales `booking.roatanselfstorage.com` y `roatanselfstorage.storeganise.com` con el checkout de pagos puntuales `https://www.payroatanselfstorage.com`. El cliente debe conservar su identificación sin volver a escribir su contraseña.
 
-Nuestro servidor recibe los eventos firmados con `sg-signature` en:
+Necesitamos confirmar:
 
-https://www.payroatanselfstorage.com/api/storeganise/billing
+1. Que un campo de usuario `pay_checkout_bridge`, tipo `string` y `ownerAcl: "read"`, puede ser leído por el propio cliente autenticado mediante `GET /api/v1/user?include=customFields`, y no por otros clientes ni usuarios anónimos. Contendría un acceso limitado a cinco minutos, no claves administrativas ni datos de tarjeta. El cliente tampoco debe poder editarlo.
+2. Que la clave administrativa puede actualizar parcialmente ese campo con `PUT /api/v1/admin/users/{id}`, preservando los demás. Entendemos que se pueden generar eventos de usuario; sus valores no deben aparecer en APIs públicas.
+3. El permiso y contrato de `POST /api/v1/admin/jobs/{id}/operations/previewInvoice`, que usamos para mostrar el total de una reserva sin factura interna. Necesitamos confirmar que la operación no confirma el pedido ni inicia cobros.
+4. Cómo configurar el recorrido nativo para confirmar la reserva, cumplir contratos y preparar su registro contable antes de un pago externo puntual. Pay no registra una tarjeta reutilizable ni debe saltarse estos requisitos. Sin confirmación, no autoriza el cargo.
+5. Que las automatizaciones del centro habilitan la ocupación de la bodega por el cliente correcto después de registrar el pago externo con método `card`. El navegador no activa cuentas; Pay comprueba el estado en Storeganise.
 
-El manejador `billing.checkout` espera `data.userId`, la reserva mediante `data.orderId`/`data.jobId` o `returnUrl` con `orderId`, y `data.siteId` cuando corresponda. Devuelve HTML que redirige a un enlace privado de Pay, de un solo uso. También tenemos una entrada JSON firmada `pay.checkout` en `/api/storeganise/checkout` que devuelve `{ "url": "..." }`.
+Conservamos los webhooks firmados y la conexión de Storeganise con nuestro Portal fiscal. La reserva está en USD y el cargo bancario en HNL con BCH. La factura fiscal posterior al pago es distinta del registro contable interno.
 
-Solicitamos:
-
-1. Instalar/configurar la integración de facturación personalizada para que `/api/v1/billing/custom?siteId=...&returnUrl=...`, llamado con la sesión activa del cliente, entregue el checkout de Pay. Este endpoint mostró HTTP 404 anteriormente; configurar solamente los webhooks no resolvió la entrada.
-2. Confirmar el contrato de respuesta que requiere la integración: HTML alojado o URL JSON, y cómo transporta la reserva concreta. El endpoint de Pay no acepta un identificador de usuario como prueba de identidad desde el navegador.
-3. Habilitar el recorrido de pago externo puntual: confirmación de la reserva y requisitos contractuales, creación de su registro contable, cobro en Pay y registro del pago externo por API. El botón nativo de añadir tarjeta no debe quedarse esperando una tarjeta guardada, porque esta integración no guarda métodos reutilizables ni realiza cargos recurrentes por `billing.charge`.
-4. Confirmar que nuestra clave pueda consultar la vista previa `POST /api/v1/admin/jobs/{id}/operations/previewInvoice`, usuarios, reservas, unidades y facturas; registrar pagos externos; y completar el paso de factura inicial pagada cuando esté habilitado.
-5. Configurar las automatizaciones del centro para que, después de registrar el pago y cumplir los requisitos de la reserva, la bodega quede ocupada por el mismo cliente. Pay comprueba ese estado antes de mostrarla como habilitada.
-
-Los precios de la reserva se manejan en USD y el cargo bancario en HNL con conversión BCH. El pago externo se registra en la moneda de Storeganise. La factura fiscal se genera en nuestro portal separado, mediante su conexión existente con Storeganise.
-
-No incluimos claves ni secretos en este mensaje. Agradecemos confirmar la configuración y facilitar el contrato de la integración para poder validar el recorrido completo cuando autoricemos las pruebas.
+No incluimos claves, cookies ni accesos temporales.
 
 Saludos,
 Roatan Self Storage

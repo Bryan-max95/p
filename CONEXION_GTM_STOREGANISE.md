@@ -1,91 +1,142 @@
-# Storeganise → Pay sin segundo inicio de sesión
+# Storeganise → Pay: etiqueta V8
 
-Actualización: 14 de octubre de 2026. Revisión por lectura de código. No se ejecutaron servidor, compilación, pruebas ni cobros. La integración desplegada no está validada.
+Script completo: [examples/gtm-storeganise-pago.html](examples/gtm-storeganise-pago.html). Destino: **https://www.payroatanselfstorage.com/**, con una sesión privada creada por Pay. V8 no solicita `/api/v1/billing/custom` ni espera su enlace.
 
-## Registro: aviso Too many requests
+**Estado:** código implementado con validación automatizada local. Antes de activarlo para clientes hay que configurar y verificar el canal privado descrito abajo. No se ha comprobado el recorrido completo en la cuenta real ni realizado cobros. La conexión bancaria y sus credenciales no se modificaron.
 
-El aviso reportado aparece al crear la cuenta, antes del pago. La captura de Network confirma `users?include=...` con HTTP 429, iniciada por `api.js` del cliente de Storeganise, desde el dominio público de reservas. El usuario informa que ocurre también desde otra conexión. No se ha confirmado el motivo exacto del límite ni su contador: hace falta revisar la respuesta y `Retry-After`, si existe.
+## Diagnóstico
 
-Storeganise documenta un máximo de **5 registros desde una misma IP en un período móvil de 24 horas**. Esto explica una causa posible, pero no demuestra que sea la causa de este caso. La etiqueta de Pay no envía solicitudes de creación de clientes ni puede quitar ese límite del servidor. Se puede continuar con una cuenta ya creada. Si el bloqueo persiste desde conexiones diferentes, Storeganise debe revisar el límite aplicado y el registro de esa solicitud.
+V7 mostraba `CHECKOUT_HTTP_404` cuando su petición autenticada a `/api/v1/billing/custom` recibía 404. El overlay detenía la navegación antes de llegar a Pay. Sin el cuerpo de aquella respuesta no se puede atribuir la causa interna a una configuración concreta de Storeganise. V8 evita esa dependencia.
 
-Fuentes oficiales: [Too many requests](https://help.storeganise.com/article/293-too-many-requests-alert) y [Troubleshooting logging in](https://help.storeganise.com/article/400-troubleshooting-logging-in?type=video).
+El HTTP 429 al registrar clientes es independiente: esta etiqueta solo actúa al pulsar pago en una reserva con `step=billing`. No intercepta registro ni inicio de sesión, y no consulta APIs al cargarse.
 
-Se leyó el contenedor público `GTM-N5GX4DLN`: estaba publicada la etiqueta V4, sin los identificadores de las versiones antiguas de redirección. Esto no equivale a inspeccionar todos los contenedores o scripts que pudiera cargar el navegador.
+## 1. Campo privado en Storeganise
 
-## Corrección del dominio de reservas: V6
+En **Configuración → Campos personalizados → Usuarios**, crear:
 
-La captura muestra `booking.roatanselfstorage.com`. Se confirmó por lectura pública que ese dominio sirve el cliente de Roatan Self Storage con su URL canónica y el mismo archivo principal de Storeganise. Las etiquetas anteriores solo se ejecutaban en `roatanselfstorage.storeganise.com`; por tanto, no podían abrir Pay desde el dominio personalizado. Ese defecto era independiente del HTTP 429 del registro.
+| Opción | Valor |
+| --- | --- |
+| Código | `pay_checkout_bridge` |
+| Título | `Acceso temporal a Pay` |
+| Tipo | `String` / texto |
+| Permisos del cliente | `View only` / Solo lectura; API: `ownerAcl: "read"` |
+| Obligatorio | No |
+| Secreto / múltiples valores | No |
+| Opciones | Vacío |
+| Longitud mínima | Vacío o 0 |
+| Longitud máxima | Vacío o al menos 4096 |
 
-V6 admite exactamente ambos orígenes HTTPS y realiza las peticiones de cliente contra el origen de la página actual. Esto conserva la cookie de sesión y cumple la política `connect-src 'self'` del portal. El destino de pago sigue siendo `https://www.payroatanselfstorage.com/?session=...`.
+La clave administrativa debe poder leer esa configuración y actualizar el campo del usuario. Pay valida la definición antes de emitir accesos. Storeganise documenta estos permisos, pero **no presenta este mecanismo como un SSO oficial**: es una integración propia basada en sus APIs y perfiles. [Campos personalizados](https://help.storeganise.com/article/114-custom-fields-settings).
 
-El servidor de Pay también admite el dominio `booking.roatanselfstorage.com` como retorno de cliente, únicamente si la API configurada corresponde a `roatanselfstorage.storeganise.com`. No se aceptan otros subdominios o cuentas. La clave de administración y las llamadas de servidor siguen usando la URL de API configurada: esta lista solo autoriza navegación de clientes, no destinos de API.
+El campo es visible en el perfil del cliente; no es invisible. Contiene JSON técnico con accesos limitados a cinco minutos. No incluirlo en correos, exportaciones públicas, analítica ni logs. Las actualizaciones pueden generar eventos de usuario para otras integraciones; no indican un pago. Si el Portal registra perfiles completos, debe excluir este campo de sus logs y documentos fiscales.
 
-V6 conserva el límite al paso de pago: sale inmediatamente cuando la página no es una reserva en `step=billing`. No intercepta registro, inicio de sesión ni administración de métodos de pago del perfil. Solo inicia la conexión al pulsar el botón de pago de la reserva.
+**Validación previa necesaria:** con cuentas controladas y sin cargos, comprobar que `GET /api/v1/user?include=customFields` entrega el valor exclusivamente al propietario autenticado. Un cliente distinto o una petición anónima no debe obtener ese perfil/campo, y el cliente no debe poder editarlo. Las APIs públicas no deben exponer valores de perfiles. Hasta comprobar ese aislamiento, conservar `STOREGANISE_BRIDGE_ENABLED=false`.
 
-Usa el `siteId` del enlace nativo cuando está presente y es válido, ahorrando una consulta. Si falta, lo lee de la reserva. Esos identificadores solo seleccionan el contexto; el servidor sigue verificando la identidad autenticada y la propiedad de la reserva.
+## 2. CSP en Storeganise
 
-Mantiene una única apertura en curso, separa intentos por al menos ocho segundos y respeta `Retry-After` ante HTTP 429. Si el servidor no indica duración, pausa sus propias solicitudes durante un minuto; **no significa que el límite de Storeganise expire en ese tiempo**. No reintenta automáticamente ni recarga la página. Solo guarda la hora de la pausa en sessionStorage, sin datos de clientes ni tokens, y cancela la solicitud pendiente al salir de la página. Esto mejora la apertura del checkout; no corrige ni evita el límite nativo de registros.
+En **Configuración → Desarrollador → Content Security Policy / CSP**, añadir a `connect-src`:
 
-Se conserva la corrección de diseño de V4: la política CSP de Storeganise exige un nonce específico para estilos. Se toma el valor de `#app[data-style-nonce]` de la página actual y se aplica al estilo antes de insertarlo. No usa el nonce de los scripts ni valores fijos. Se eliminaron los estilos en atributos HTML.
+```text
+https://www.payroatanselfstorage.com
+```
 
-También conserva `orderId` en la solicitud nativa de checkout, además del retorno, y admite direcciones relativas de la página alojada de Storeganise. El destino final sigue siendo exclusivamente `https://www.payroatanselfstorage.com/?session=...`, con la sesión emitida por el servidor. No basta con llevar al cliente a la raíz de Pay sin una sesión autenticada.
+Conservar las entradas existentes, incluido `'self'`. Para las imágenes de la transición, añadir a `img-src` estos orígenes si no están permitidos:
 
-Se reemplazó el error genérico por un código de soporte sin datos personales ni tokens. Esto permite distinguir el fallo de lectura de la reserva (`ORDER_HTTP_...`), el del checkout (`CHECKOUT_HTTP_...`), el de su página alojada (`HOSTED_HTTP_...`) y una respuesta sin enlace válido (`INVALID_CHECKOUT_RESPONSE`). No debe interpretarse automáticamente un 403, 404 o 409 como falta de integración: hay que revisar la respuesta de esa etapa.
+```text
+https://www.payroatanselfstorage.com
+https://www.baccredomatic.com
+```
 
-Para usar V6, desplegar los cambios del servidor en Vercel y reemplazar **todo** el contenido de la etiqueta en Google Tag Manager con [el archivo completo](examples/gtm-storeganise-pago.html), publicar esa versión y recargar la página de Storeganise. Mantener una sola etiqueta de pagos. GitHub/Vercel no actualizan por sí solos Google Tag Manager.
+Aplicar la política a ambos dominios de reservas. No quitar CSP ni usar `*`. [Configuración de CSP](https://help.storeganise.com/article/209-customise-your-content-security-policy).
 
-Esta corrección modifica la etiqueta y la validación de retornos de cliente en Pay. No cambia la conexión de CyberSource, credenciales, configuración de entornos ni comprobaciones de firma/propiedad de la reserva. No hay variables nuevas obligatorias. No se confirmó aún una respuesta de checkout válida con la sesión de un cliente; por eso no se afirma que el recorrido completo ya funcione. Si falla, comunicar únicamente el código `V6 / ...` mostrado, sin enviar cookies, contraseñas ni enlaces con tokens.
+## 3. Vercel y base de datos
 
-## Qué incluye esta versión
+En **Project → Settings → Environment Variables**, añadir en el entorno del despliegue:
 
-- Se retiró de Pay el formulario de correo y contraseña.
-- Se agregó una transición a pantalla completa con los logos actuales de Roatan Self Storage y BAC, con composiciones distintas para móvil y escritorio. No afirma que el pago esté aprobado mientras carga.
-- Un enlace privado firmado por la integración abre directamente el carrusel con el cliente, la bodega y el importe obtenidos del servidor.
-- El servidor admite una reserva autenticada sin factura interna previa para mostrar el importe: consulta la operación de vista previa de Storeganise. Para cobrar, Storeganise debe haber confirmado la reserva y preparado su registro contable.
-- La identidad se verifica mediante la firma del evento y la propiedad de los registros en la API. Un orderId, correo o nombre recibido del navegador no autentica al cliente.
+```dotenv
+STOREGANISE_BRIDGE_ENABLED=true
+```
 
-## Dependencia externa pendiente: no basta con desplegar
+Habilitarla después de validar el aislamiento del campo. Mientras se configura, dejarla en `false`. Verificar también:
 
-La integración de facturación personalizada de Storeganise debe estar configurada para emitir el handoff firmado y devolver al navegador el enlace de Pay. La configuración leída de la cuenta indica `billing: custom-billing`; eso no confirma que el checkout concreto esté devolviendo el enlace. La ruta nativa mostró 404 anteriormente, pero falta la respuesta autenticada actual para identificar la causa. Esta actualización no cambia la configuración de la cuenta Storeganise.
+```dotenv
+PAY_PUBLIC_URL=https://www.payroatanselfstorage.com
+STOREGANISE_PAY_ENABLED=true
+STOREGANISE_API_URL=https://roatanselfstorage.storeganise.com/api/v1/admin
+STOREGANISE_CARD_PAYMENT_METHOD=card
+```
 
-Además, su recorrido debe admitir un pago externo puntual y confirmar la reserva antes del cobro. El botón nativo de añadir tarjeta corresponde al registro de un método de pago; Pay no simula una tarjeta guardada. Si la orden permanece en notSubmitted o faltan firmas, la apertura del carrusel no confirma esa orden.
+Conservar los valores privados de `STOREGANISE_API_KEY`, `PAY_SESSION_TOKEN_SECRET` (mínimo 32 caracteres), `DATABASE_URL`, `STOREGANISE_WEBHOOK_SECRET`, BCH y CyberSource. Ninguna clave se pega en GTM. El método `card` debe existir en los métodos de pago manuales de Storeganise.
 
-Está preparado un [mensaje concreto para Storeganise](SOLICITUD_STOREGANISE_ACCESO_DIRECTO.md). No se ha enviado.
+La tabla nueva `pay_storeganise_bridge_grants` se crea mediante el esquema aditivo existente en la primera operación de base de datos. La conexión debe permitir esa migración y usar la base persistente de Pay. No se ejecutó una migración contra la base real durante este cambio.
 
-## Publicar la etiqueta
+**Entornos:** la comprobación existente exige Storeganise `.com` con banco en producción y `.dev` con sandbox. No se cambiaron esos valores. Si se conserva banco sandbox con esta cuenta `.com`, se devolverá `STOREGANISE_SANDBOX_INSTANCE_REQUIRED`; no quitar esa protección para registrar pagos ficticios en bodegas reales. El script incluido admite los dos dominios reales indicados por el comercio, no otra instancia `.dev`.
 
-1. Desplegar este commit en Vercel y conservar PAY_PUBLIC_URL=https://www.payroatanselfstorage.com.
-2. Habilitar con Storeganise la integración y el recorrido anteriores. No publicar el reemplazo suponiendo que corrige por sí solo el 404.
-3. Reemplazar completamente la etiqueta HTML anterior por [examples/gtm-storeganise-pago.html](examples/gtm-storeganise-pago.html). Mantener una sola etiqueta de pago, activada en All Pages, con disparo una vez por página. El script espera al paso de pago dentro de la navegación de Storeganise; no llama a la API por cargar la etiqueta.
-4. Publicar en Google Tag Manager y recargar Storeganise. Subir archivos a GitHub no modifica una etiqueta ya publicada.
+Redesplegar tras cambiar variables. Confirmar que el dominio de Pay apunta a ese despliegue y que su protección de Vercel no exige un login adicional para `/api/storeganise/bridge`. Conservar el webhook y la reconciliación existentes.
 
-El script utiliza la sesión activa dentro del dominio Storeganise. Obtiene el siteId del enlace nativo o, si falta, lee la reserva. Solicita el checkout nativo con Accept: application/json y un returnUrl que conserva la reserva y los parámetros nativos de retorno. No muestra ese endpoint como página al cliente: obtiene el destino autenticado y navega a https://www.payroatanselfstorage.com/?session=...
+## 4. Publicar la etiqueta
 
-Solo acepta ese dominio y un token de apertura de 43 caracteres. Si Storeganise devuelve un wrapper alojado en su propia ruta de facturación, puede leerlo una vez y extraer el enlace privado del HTML emitido por nuestro servidor. No ejecuta scripts de esa respuesta ni adivina un enlace si el proveedor devuelve otro contrato. No transmite claves, contraseñas, nombres, correos o importes en la URL.
+1. Desplegar el servidor y completar la configuración anterior.
+2. En GTM, abrir la etiqueta de pagos **HTML personalizado**.
+3. Sustituir **todo** su contenido por [el script completo](examples/gtm-storeganise-pago.html), incluyendo `<script>` y `</script>`.
+4. Mantener una sola etiqueta de pago, activada en **All Pages**, una vez por página. Desactivar versiones anteriores.
+5. Publicar el contenedor y recargar Storeganise. GitHub/Vercel no publican GTM automáticamente.
 
-Si el navegador llega con un enlace antiguo que contiene solo orderId/returnUrl, Pay no muestra datos privados. Una sesión de cliente previamente verificada aún puede abrir su reserva; de lo contrario ofrece volver a Storeganise, sin presentar otro formulario ni entrar a un cobro manual.
+V8 funciona en `https://booking.roatanselfstorage.com` y `https://roatanselfstorage.storeganise.com`. Conserva el dominio de la sesión en las lecturas y el retorno. No intercepta el botón de añadir tarjeta del perfil: cobra una reserva, no registra tarjetas reutilizables.
 
-## Servidor y moneda
+## Comunicación e identificación
 
-/api/storeganise/billing y /api/storeganise/checkout validan sg-signature antes de crear el enlace de apertura. Para una reserva sin factura, el servidor usa POST /api/v1/admin/jobs/{id}/operations/previewInvoice y lee su total. Esta operación se identificó por lectura del cliente público de administración de Storeganise; no se ha ejecutado ni se ha confirmado su permiso en esta cuenta.
+Todas las conexiones son HTTPS. La cookie de Storeganise permanece en su propio dominio.
 
-El evento debe identificar al usuario y esa reserva. Pay verifica el propietario, el centro y el estado antes de obtener los datos. Una sesión por reserva/factura y los enlaces de un solo uso separan los clientes y evitan iniciar otro cobro por un reenvío del evento.
+1. Al pulsar pago, GTM lee `/api/v1/user?include=customFields` con la sesión activa. Obtiene el ID del usuario y el `orderId` de la página.
+2. Envía `POST https://www.payroatanselfstorage.com/api/storeganise/bridge` con `{ operation: "prepare", userId, orderId }`. Esos IDs son referencias, **no prueba de identidad**. Pay consulta el propietario y estado reales de la reserva.
+3. Pay guarda el hash de un acceso temporal en PostgreSQL y entrega su valor únicamente en el campo de ese perfil mediante una actualización parcial. La respuesta pública es solo `{ "prepared": true }`, sin acceso, precio, datos personales ni enlace.
+4. GTM vuelve a leer el propio perfil autenticado y comprueba que sigue siendo el mismo usuario. Obtiene el acceso de esa reserva. Son dos lecturas, sin sondeo ni reintentos automáticos.
+5. Envía `operation: "redeem"` al mismo endpoint con el acceso, la reserva, un identificador aleatorio del intento y el retorno. Pay verifica hash, caducidad y vinculación. Después de la primera reclamación rechaza otro identificador de intento.
+6. Pay vuelve a comprobar propietario/centro/bodega, consulta el importe y crea o recupera la sesión del carrusel existente. GTM navega a `https://www.payroatanselfstorage.com/?session=...` usando un enlace de apertura de un solo uso.
 
-Los precios se muestran en USD y el cargo se prepara en HNL con BCH. Se mantiene la cotización durante la vigencia de la sesión y se vuelve a comprobar el saldo antes de autorizar la tarjeta.
+CORS restringe páginas de origen, pero **no autentica al cliente**. La prueba es el acceso obtenido del perfil privado. No se transmiten claves administrativas, contraseñas ni cookies a Pay, ni precios/nombres/correos en la URL. GTM solo guarda una hora de pausa en `sessionStorage`.
 
-El modo firmado no necesita una cookie con credenciales de Storeganise. No completa por la fuerza pasos de registro, firmas o confirmación: si la factura interna cobrable todavía no existe, devuelve STOREGANISE_RESERVATION_PENDING antes de la autorización. La factura fiscal del portal es independiente y sigue generándose después del pago.
+Los registros y bloqueos de PostgreSQL separan reservas y serializan entregas por cliente. Límites: cinco reservas pendientes por perfil, doce accesos nuevos por diez minutos por cliente y veinte peticiones por minuto por IP. Un valor vencido puede permanecer en el perfil, pero el servidor ya no lo acepta; una entrega posterior elimina los valores obsoletos del contenido entregado.
 
-No hay variables nuevas obligatorias en esta actualización. Se conservan la configuración de BCH, CyberSource, PostgreSQL, STOREGANISE_PAY_ENABLED, el secreto del webhook y el método card. Producción requiere Storeganise .com; sandbox bancario solo se conecta a la instancia Storeganise .dev. No se modificaron credenciales ni entornos.
+## Importe, pago y bodega
 
-## Pago y bodega
+Con factura interna, Pay consulta el saldo exacto y su propietario. Sin factura, usa `POST /api/v1/admin/jobs/{id}/operations/previewInvoice` para mostrar el total de la reserva. Esa operación se identificó en el cliente administrativo de Storeganise; **su permiso y respuesta en esta cuenta requieren validación real**. Las pruebas locales usan una respuesta simulada.
 
-El procesamiento existente registra en Storeganise un pago externo con método card solamente después de confirmar el cobro en CyberSource. Comprueba la factura exacta, el importe y el saldo. Puede completar el paso configurado de factura inicial pagada.
+El precio se muestra en USD y el cargo se calcula en HNL mediante BCH. Se reutilizan el carrusel, tokenización, 3DS y procesamiento bancario existentes. Si faltan datos obligatorios de dirección en Storeganise, el carrusel conserva su captura; no se inventan ni se solicita la contraseña.
 
-Pay solo muestra la bodega activa cuando Storeganise devuelve occupied para el mismo cliente y alquiler. La confirmación, firmas y ocupación automática dependen del recorrido y las automatizaciones del centro; este commit no las habilita en Storeganise.
+**Abrir una reserva provisional no autoriza a cobrarla.** Antes de cualquier autorización bancaria, Pay vuelve a consultar la reserva y exige su registro contable interno confirmado. Si faltan confirmación, contratos o factura interna, detiene el cobro con `STOREGANISE_RESERVATION_PENDING`. La factura fiscal del Portal es diferente y sigue siendo posterior al pago.
 
-El portal fiscal sigue recibiendo los eventos de Storeganise por la conexión que administra el comercio. No se agregaron notificaciones directas desde Pay a ese portal.
+Queda una dependencia del recorrido real: Storeganise debe permitir cumplir los requisitos y preparar el registro interno antes del pago externo puntual. Esta etiqueta no confirma la reserva por el cliente ni habilita esas automatizaciones. No se anuncia el recorrido completo como operativo hasta validarlo.
 
-## Referencias
+Después de un cobro confirmado, el proceso existente **servidor Pay → Storeganise** registra el pago en la factura del cliente correcto, con método `card`. El script no activa cuentas. Pay solo muestra la bodega activa cuando Storeganise confirma su ocupación por ese cliente. Storeganise mantiene su conexión con el Portal fiscal; no se añadió comunicación directa Pay → Portal.
 
-[Checkout personalizado y requisito de Add-on](https://help.storeganise.com/article/471-accepting-payments-custom-booking-app).
-[Confirmación, facturación y ocupación de bodegas](https://help.storeganise.com/article/159-jobs-move-ins).
+## Diagnóstico V8
+
+| Código | Qué revisar |
+| --- | --- |
+| `BRIDGE_HTTP_404` | Ruta nueva ausente del despliegue o dominio apuntando a una versión anterior. |
+| `BRIDGE_NETWORK` | CSP `connect-src`, CORS, conexión o protección de despliegue. |
+| `STOREGANISE_BRIDGE_DISABLED` | Variable ausente/en false o falta redesplegar. |
+| `STOREGANISE_BRIDGE_FIELD_NOT_CONFIGURED` | Definición y permisos exactos del campo. |
+| `STOREGANISE_BRIDGE_PROFILE_UNAVAILABLE` | El perfil no devolvió acceso para esa reserva. |
+| `USER_HTTP_401` | Sesión de Storeganise vencida. |
+| `STOREGANISE_API_HTTP_401` / `403` | Credencial/permisos de API administrativa, no tarjeta. |
+| `STOREGANISE_API_HTTP_404` | Recurso/operación de API; revisar registro sin suponer su causa. |
+| `STOREGANISE_BRIDGE_ACCESS_EXPIRED` / `USED` | Volver a la reserva y abrir un nuevo acceso. |
+| `STOREGANISE_IDENTITY_MISMATCH` / `ACCESS_INVALID` | Usuario, reserva o acceso no corresponden. |
+| `STOREGANISE_SANDBOX_INSTANCE_REQUIRED` | Banco sandbox con cuenta Storeganise `.com`. |
+| `STOREGANISE_RESERVATION_PENDING` | Falta registro interno confirmado; no se autoriza el cargo. |
+| `USER_HTTP_429` / `BRIDGE_HTTP_429` | Respetar Retry-After; no hay reintentos automáticos. |
+
+Compartir solo código, etapa y estado HTTP. No enviar valores del campo, cookies ni enlaces con `session`.
+
+## Validación y límites
+
+Resultado local de esta entrega: **69 tests aprobados**, TypeScript sin errores, ESLint aprobado en los archivos revisados y compilación de producción completada. La compilación mostró avisos de caché de Webpack sin impedir el resultado. Tras ajustar el código de diagnóstico, se repitieron los 17 tests de la integración y pasaron.
+
+Los tests locales cubren propietario, caducidad/reutilización, saldo en servidor, reserva sin factura, bloqueo del cobro pendiente, CORS, ambos dominios, errores HTTP, doble clic, registro intacto y ausencia de llamadas a `/billing/custom`. Proveedores y PostgreSQL están simulados. Se ejecutan también los tests existentes de moneda y pagos para detectar regresiones.
+
+TypeScript y la compilación verifican código, no el contrato real de Storeganise. Quedan pendientes: lectura privada del campo con sesiones reales, permiso de vista previa, CSP desplegada, sincronización y ocupación tras un pago autorizado. No se inició un servidor de desarrollo ni se enviaron cargos. Se conserva CSS adaptable para móvil; no se hizo una prueba visual en dispositivos reales.
+
+Referencias: [actualización parcial de campos por API](https://help.storeganise.com/article/299-integration-example-case-study-sensorberg), [buenas prácticas de API](https://help.storeganise.com/article/297-api-best-practices), [pasos de ocupación](https://help.storeganise.com/article/159-jobs-move-ins).

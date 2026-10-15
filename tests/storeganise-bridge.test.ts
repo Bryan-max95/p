@@ -6,6 +6,7 @@ import { database, closeDatabase } from '../lib/pay/db';
 import { bridgeInput, bridgeToken, bridgeHash, assertBridgeField, assertBridgeProof, BRIDGE_FIELD, type BridgeGrant } from '../lib/storeganise/bridge-protocol';
 import { prepareProfileBridge, redeemProfileBridge } from '../lib/storeganise/bridge';
 import { prepareReservationForPayment } from '../lib/storeganise/reservation';
+import { verifyStoreganiseCheckout } from '../lib/storeganise/checkout';
 import { publicSession } from '../lib/pay/service';
 import { OPTIONS, POST } from '../app/api/storeganise/bridge/route';
 import type { SessionRow } from '../lib/pay/types';
@@ -26,6 +27,7 @@ function fixture(t: TestContext) {
     CYBERSOURCE_ENVIRONMENT: 'production', CYBERSOURCE_MERCHANT_ID: 'unit-test-merchant',
     CYBERSOURCE_KEY_ID: crypto.randomUUID(), CYBERSOURCE_SHARED_SECRET: Buffer.alloc(32, 8).toString('base64'),
     STOREGANISE_PAY_ENABLED: 'true', STOREGANISE_BRIDGE_ENABLED: 'true', STOREGANISE_API_URL: origin + '/api/v1/admin',
+    STOREGANISE_LIVE_SANDBOX_ENABLED: 'false', STOREGANISE_TEST_CUSTOMER_IDS: owner,
     STOREGANISE_API_KEY: 'unit-test-private-key', PAY_SESSION_TOKEN_SECRET: secret,
     PAY_PUBLIC_URL: 'https://www.payroatanselfstorage.com' };
   const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
@@ -34,7 +36,7 @@ function fixture(t: TestContext) {
   const sessions = new Map<string, SessionRow>();
   const deliveries: Record<string, unknown>[] = [];
   const requests: Array<{ path: string; method: string }> = [];
-  const state = { owner, invoice: false, orderState: 'notSubmitted', field: { ...field },
+  const state = { owner, invoice: false, total: 199, disabled: false, orderState: 'notSubmitted', field: { ...field },
     customFields: { unrelated: 'preserve me' } as Record<string, unknown>, providerStatus: 200, attempts: 0, releaseCalls: 0 };
   const runQuery = async (sql: string, values: unknown[] = []) => {
     let rows: unknown[] = [];
@@ -70,7 +72,7 @@ function fixture(t: TestContext) {
         currency: String(values[10]), amount: String(values[11]), bill_to: JSON.parse(String(values[12])), return_url: values[13],
         is_demo: values[14], reference_usd_amount: values[16], usd_hnl_rate: values[17], fx_source: values[18],
         fx_rate_date: values[19], fx_fetched_at: new Date(String(values[20])), environment: values[21], checkout_source: values[22],
-        storeganise_context: JSON.parse(String(values[23])), status: 'open', created_at: new Date(), expires_at: new Date(Date.now() + 1800000),
+        storeganise_context: JSON.parse(String(values[23])), storeganise_status: values[24], portal_status: values[15], status: 'open', created_at: new Date(), expires_at: new Date(Date.now() + 1800000),
       } as SessionRow;
       sessions.set(s.id, s); rows = [s];
     } else if (sql.startsWith('UPDATE pay_sessions SET return_url=')) sessions.get(String(values[0]))!.return_url = String(values[1]);
@@ -91,14 +93,14 @@ function fixture(t: TestContext) {
     if (path === `/jobs/${orderId}` && method === 'GET') body = { id: orderId, ownerId: state.owner, type: 'unit_moveIn', state: 'ready', steps: [],
       result: { siteId, unitTypeId: typeId, startDate: '2026-10-30', orderState: state.orderState,
         ...(state.invoice ? { invoiceId, unitRentalId: rentalId, unitId } : {}) } };
-    else if (path === `/jobs/${orderId}/operations/previewInvoice` && method === 'POST') body = { total: 199 };
-    else if (path === `/users/${owner}` && method === 'GET') body = { id: owner, firstName: 'Test', lastName: 'Customer', email: 'customer@example.test', customFields: state.customFields };
+    else if (path === `/jobs/${orderId}/operations/previewInvoice` && method === 'POST') body = { total: state.total };
+    else if (path === `/users/${owner}` && method === 'GET') body = { id: owner, firstName: 'Test', lastName: 'Customer', email: 'customer@example.test', isDisabled: state.disabled, customFields: state.customFields };
     else if (path === `/users/${owner}` && method === 'PUT') {
       const update = JSON.parse(String(init?.body)); deliveries.push(update);
       Object.assign(state.customFields, update.customFields); body = {};
     } else if (path === '/settings') body = { currencyCode: 'USD', manualPaymentMethods: [{ code: 'card' }], userCustomFields: [state.field] };
     else if (path === `/unit-types/${typeId}`) body = { id: typeId, title: { en: 'Hallway Medium' } };
-    else if (path === `/invoices/${invoiceId}`) body = { id: invoiceId, owner: { id: owner }, unitRentalId: rentalId, siteId, state: 'sent', balance: 199, total: 199, currency: 'USD', payments: [] };
+    else if (path === `/invoices/${invoiceId}`) body = { id: invoiceId, owner: { id: owner }, unitRentalId: rentalId, siteId, state: 'sent', balance: state.total, total: state.total, currency: 'USD', payments: [] };
     else if (path === `/unit-rentals/${rentalId}`) body = { id: rentalId, ownerId: owner, siteId, unitId, state: 'active', moveInJobId: orderId };
     else if (path === `/units/${unitId}`) body = { id: unitId, siteId, name: 'H-01', state: 'reserved', ownerId: owner, rentalId };
     else throw new Error(`Unexpected provider call: ${method} ${path}`);
@@ -231,11 +233,79 @@ test('bridge route CORS supports exactly the two customer origins and no anonymo
   }
 });
 
-test('feature is opt-in; sandbox cannot write grants into a real Storeganise account', async t => {
+test('feature is opt-in; sandbox cannot write live grants without explicit permission', async t => {
   const f = fixture(t);
   process.env.STOREGANISE_BRIDGE_ENABLED = 'false';
   await assert.rejects(prepareProfileBridge({ operation: 'prepare', userId: owner, orderId }), /BRIDGE_DISABLED/);
   process.env.STOREGANISE_BRIDGE_ENABLED = 'true'; process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
   await assert.rejects(prepareProfileBridge({ operation: 'prepare', userId: owner, orderId }), /SANDBOX_INSTANCE_REQUIRED/);
   assert.equal(f.requests.length, 0);
+});
+
+test('live sandbox opens the authenticated draft with USD/HNL totals and revalidates without submitting it', async t => {
+  const f = fixture(t);
+  process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
+  process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  const result = await redeemProfileBridge(f.deliveredInput(), booking);
+  assert.match(result.url, /^https:\/\/www\.payroatanselfstorage\.com\/\?session=/);
+  const session = [...f.sessions.values()][0];
+  assert.equal(session.environment, 'sandbox');
+  assert.equal(session.customer_id, owner); assert.equal(session.order_id, orderId);
+  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '5273.50');
+  assert.equal(session.storeganise_status, 'sandbox_only'); assert.equal(session.portal_status, 'disabled');
+  assert.equal(publicSession(session).requiresReservationConfirmation, false);
+  await verifyStoreganiseCheckout(session);
+  assert.equal(session.invoice_id, null);
+  session.storeganise_context!.reservationAuthentication = 'customer-token';
+  assert.equal(publicSession(session).requiresReservationConfirmation, false);
+  await verifyStoreganiseCheckout(session); // No native submit/cookie dependency in mixed sandbox.
+  assert.equal(f.state.orderState, 'notSubmitted');
+  assert.deepEqual(f.requests.filter(r => r.method !== 'GET' && !r.path.endsWith('/previewInvoice')),
+    [{ method: 'PUT', path: `/users/${owner}` }], 'Only the private bridge grant is written');
+  f.state.total = 200;
+  await assert.rejects(verifyStoreganiseCheckout(session), /INVOICE_AMOUNT_CHANGED/);
+  f.state.total = 199; f.state.owner = other;
+  await assert.rejects(verifyStoreganiseCheckout(session), /IDENTITY_MISMATCH/);
+  f.state.owner = owner; f.state.orderState = 'abandoned';
+  await assert.rejects(verifyStoreganiseCheckout(session), /ORDER_NOT_ACTIVE/);
+  f.state.orderState = 'notSubmitted'; f.state.disabled = true;
+  await assert.rejects(verifyStoreganiseCheckout(session), /CUSTOMER_DISABLED/);
+  f.state.disabled = false;
+  process.env.CYBERSOURCE_ENVIRONMENT = 'production';
+  await assert.rejects(verifyStoreganiseCheckout(session), /INSTANCE_ENVIRONMENT_MISMATCH/);
+});
+
+test('sandbox allowlist is enforced before grants and again on redemption and payment', async t => {
+  const f = fixture(t);
+  process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
+  process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
+  process.env.STOREGANISE_TEST_CUSTOMER_IDS = other;
+  await assert.rejects(prepareProfileBridge({ operation: 'prepare', userId: owner, orderId }), /SANDBOX_CUSTOMER_NOT_ALLOWED/);
+  assert.equal(f.requests.length, 0); assert.equal(f.deliveries.length, 0);
+  process.env.STOREGANISE_TEST_CUSTOMER_IDS = owner;
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  const input = f.deliveredInput();
+  process.env.STOREGANISE_TEST_CUSTOMER_IDS = other;
+  await assert.rejects(redeemProfileBridge(input, booking), /SANDBOX_CUSTOMER_NOT_ALLOWED/);
+  process.env.STOREGANISE_TEST_CUSTOMER_IDS = owner;
+  await redeemProfileBridge(input, booking);
+  const session = [...f.sessions.values()][0];
+  process.env.STOREGANISE_TEST_CUSTOMER_IDS = other;
+  await assert.rejects(verifyStoreganiseCheckout(session), /SANDBOX_CUSTOMER_NOT_ALLOWED/);
+});
+
+test('sandbox can verify an existing live invoice but still reports a test-only session', async t => {
+  const f = fixture(t); f.state.invoice = true; f.state.orderState = 'submitted';
+  process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
+  process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  await redeemProfileBridge(f.deliveredInput(), booking);
+  const session = [...f.sessions.values()][0];
+  assert.equal(session.invoice_id, invoiceId); assert.equal(session.unit_id, unitId);
+  assert.equal(publicSession(session).storeganise?.status, 'sandbox_only');
+  await verifyStoreganiseCheckout(session);
+  f.state.total = 200;
+  await assert.rejects(verifyStoreganiseCheckout(session), /INVOICE_AMOUNT_CHANGED/);
+  assert.equal(f.requests.some(r => /payments|steps/.test(r.path)), false);
 });

@@ -199,7 +199,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
   }, [acceptResponse, manualSandboxEnabled]);
 
   const pending = uncertain || ['processing', 'unknown', 'pending', 'reconciling'].includes(session?.status ?? '');
-  const awaitingStoreganise = Boolean(session?.receipt && session.storeganise && session.storeganise.status !== 'active');
+  const awaitingStoreganise = Boolean(session?.receipt && session.storeganise && !['active','sandbox_only'].includes(session.storeganise.status));
   const sessionId = session?.id;
 
   useEffect(() => {

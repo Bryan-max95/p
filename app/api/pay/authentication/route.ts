@@ -6,6 +6,7 @@ import { assertAuthenticationUrl, CyberSourceGateway, GatewayError } from '@/lib
 import { verifyStoreganiseCheckout } from '@/lib/storeganise/checkout';
 import { StoreganiseIntegrationError } from '@/lib/storeganise/config';
 import { syncStoreganiseSession } from '@/lib/storeganise/sync';
+import { storeganisePaymentWritesAllowed } from '@/lib/storeganise/payment-policy';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
     const updated = await finishAttempt(attempt.id, { ...result, brand: token.brand, last4: token.last4,
       response: { ...result, setupId: state.setupId, enrollmentId: state.enrollmentId, authenticationId: authentication.transactionId,
         authenticationStatus: authentication.gatewayStatus, paresStatus: authentication.paresStatus } });
-    if(updated.status==='succeeded'&&updated.storeganise_context)after(async()=>{try{await syncStoreganiseSession(updated.id);}catch{/* Durable delivery remains available to the worker. */}});
+    if(updated.status==='succeeded'&&storeganisePaymentWritesAllowed(updated))after(async()=>{try{await syncStoreganiseSession(updated.id);}catch{/* Durable delivery remains available to the worker. */}});
     return NextResponse.json({ session: publicSession(updated) }, { status: result.status === 'declined' ? 402 : 200 });
   } catch (error) {
     if (attemptId) {

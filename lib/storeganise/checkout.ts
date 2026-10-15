@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { assertStoreganiseEnabled, StoreganiseIntegrationError, storeganiseReturnUrl } from './config';
+import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganiseReturnUrl } from './config';
+import { isLiveStoreganiseSandbox } from './payment-policy';
 import { assertOrderActive, assertPayable, getJob, getUser, invoiceContext, sgId, usdAmount } from './records';
 import { storeganiseGet } from './client';
 import { createCheckoutSession, requiredUrl } from '../pay/service';
@@ -18,6 +19,7 @@ export const checkoutIdsSchema = z.object({ userId: sgId, invoiceId: sgId.option
 export async function resolveCheckout(value: unknown) {
   const { url, environment } = assertStoreganiseEnabled();
   const ids = checkoutIdsSchema.parse(value);
+  assertStoreganiseTestCustomer(ids.userId);
   if(ids.orderId&&ids.jobId&&ids.orderId!==ids.jobId)throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH',403);
   const orderId = ids.orderId ?? ids.jobId;
   const job = orderId ? await getJob(orderId) : undefined;
@@ -119,11 +121,19 @@ export async function openStoreganiseCheckout(value: unknown) {
 /** Re-check the same invoice just before authorization; the browser never supplies its price. */
 export async function verifyStoreganiseCheckout(session: SessionRow) {
   if (!session.storeganise_context) return;
+  const { url, environment } = assertStoreganiseEnabled();
+  assertStoreganiseTestCustomer(session.customer_id);
+  if (session.environment !== environment || session.storeganise_context.apiOrigin !== url.origin) {
+    throw new StoreganiseIntegrationError('STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH', 409);
+  }
   if (session.storeganise_context.kind === 'reservation') {
     const { prepareReservationForPayment } = await import('./reservation');
     await prepareReservationForPayment(session);
+    if (isLiveStoreganiseSandbox(session)) return;
   }
-  const { url, environment } = assertStoreganiseEnabled();
+  if (isLiveStoreganiseSandbox(session) && (await getUser(session.customer_id)).isDisabled) {
+    throw new StoreganiseIntegrationError('CUSTOMER_DISABLED', 403);
+  }
   const binding = session.storeganise_context;
   if (!binding.invoiceId || !binding.rentalId || session.environment !== environment || binding.apiOrigin !== url.origin || binding.customerId !== session.customer_id ||
     binding.invoiceId !== session.invoice_id || binding.unitId !== session.unit_id) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);

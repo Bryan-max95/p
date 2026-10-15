@@ -183,6 +183,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
   const payment = usePaymentSession(manualSandboxEnabled);
+  const liveSandbox = payment.session?.storeganise?.status === 'sandbox_only';
   const [manual, setManual] = useState({ unitName: '', clientName: '', amount: '' });
   const manualEntry = !payment.session;
   const unitNumber = payment.session?.unitName ?? manual.unitName;
@@ -194,8 +195,8 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
   const referenceAmount = priceReference?.amount ?? (manualEntry ? manual.amount : payment.session?.currency === 'USD' ? amount : '');
   const displayLabel = manualEntry ? (manual.amount ? `$ ${manual.amount} USD` : '— USD') : referenceAmount ? `$ ${referenceAmount} USD` : chargeLabel;
   const exchangeNotice = priceReference ? (lang === 'es'
-    ? `Se debitarán ${chargeLabel} de su tarjeta. Tipo de cambio: L ${Number(priceReference.hnlPerUsd)} por USD 1.`
-    : `Your card will be charged ${chargeLabel}. Exchange rate: L ${Number(priceReference.hnlPerUsd)} per USD 1.`) : '';
+    ? `${liveSandbox ? 'Importe de prueba:' : 'Se debitarán'} ${chargeLabel}${liveSandbox ? '. Sin cobro real.' : ' de su tarjeta.'} Tipo de cambio: L ${Number(priceReference.hnlPerUsd)} por USD 1.`
+    : `${liveSandbox ? 'Test amount:' : 'Your card will be charged'} ${chargeLabel}.${liveSandbox ? ' No real charge.' : ''} Exchange rate: L ${Number(priceReference.hnlPerUsd)} per USD 1.`) : '';
   const rateSource = priceReference?.source === 'BCH' ? `${lang === 'es' ? 'Fuente: Banco Central de Honduras' : 'Source: Banco Central de Honduras'} · ${priceReference.rateDate}` : '';
 
   // Form State - Card Details (Step 2)
@@ -536,6 +537,11 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
           </div>
 
           {/* Vistas dinámicas del Carrusel */}
+          {liveSandbox && <p className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950" role="status">
+            {lang === 'es'
+              ? 'Modo de prueba. Ingrese una tarjeta de prueba de CyberSource. La reserva y el monto vienen de Storeganise; esta operación no realiza un cobro real ni activa su bodega.'
+              : 'Test mode. Enter a CyberSource test card. The booking and amount come from Storeganise; this transaction does not charge real money or activate your unit.'}
+          </p>}
           <AnimatePresence mode="wait">
             
             {/* ================= SLIDE 1: DATOS DE BODEGA Y MONTO ================= */}
@@ -903,7 +909,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                       : (lang==='es'?'Pago confirmado en sandbox':'Payment confirmed in sandbox')}
                   </h2>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    {payment.session?.isDemo
+                    {payment.session?.isDemo || liveSandbox
                       ? (lang==='es'?'Transacción de prueba guardada. No aplica pagos a facturas fiscales ni activa bodegas.':'Test transaction saved. It does not pay fiscal invoices or activate storage units.')
                       : payment.session?.source === 'manual'
                         ? (lang==='es'?'Conserve este comprobante. Roatan Self Storage registrará la aplicación del pago a su cuenta.':'Keep this receipt. Roatan Self Storage will record the payment against your account.')
@@ -915,14 +921,16 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
 
                 {payment.session?.storeganise && <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2" role="status">
                   <p className="font-bold text-slate-800">{lang==='es'?'Estado de su reserva':'Booking status'}</p>
-                  <p>{payment.session.storeganise.status==='active'
+                  <p>{liveSandbox
+                    ? (lang==='es'?'Prueba finalizada. Su reserva real sigue sin registrar este pago de prueba y su bodega no se activa con esta operación.':'Test completed. This test payment is not applied to your real booking and does not activate your unit.')
+                    : payment.session.storeganise.status==='active'
                     ? (lang==='es'?'Pago aplicado y bodega habilitada. Puede regresar a su cuenta.':'Payment applied and unit available. You can return to your account.')
                     : payment.session.storeganise.status==='awaiting_move_in'
                       ? (lang==='es'?'Pago aplicado en Storeganise. La habilitación de la bodega está pendiente de completar la entrada.':'Payment applied in Storeganise. Your unit is awaiting move-in completion.')
                       : payment.session.storeganise.status==='review'
                         ? (lang==='es'?'Su pago está confirmado. El registro o la habilitación necesita revisión de Roatan Self Storage. Conserve este comprobante y no vuelva a pagar.':'Your payment is confirmed. Registration or activation needs review by Roatan Self Storage. Keep this receipt and do not pay again.')
                         : (lang==='es'?'Estamos registrando su pago en Storeganise. No vuelva a pagar; la confirmación se actualizará automáticamente.':'We are registering your payment in Storeganise. Do not pay again; confirmation will update automatically.')}</p>
-                  {payment.session.storeganise.status!=='active'&&<button type="button" onClick={()=>void payment.refresh().catch(()=>{})} className="font-bold underline text-xs">{lang==='es'?'Actualizar estado':'Refresh status'}</button>}
+                  {!liveSandbox&&payment.session.storeganise.status!=='active'&&<button type="button" onClick={()=>void payment.refresh().catch(()=>{})} className="font-bold underline text-xs">{lang==='es'?'Actualizar estado':'Refresh status'}</button>}
                 </div>}
 
                 {payment.session?.receipt&&payment.session.storeganise?.status==='active'&&
@@ -966,7 +974,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                       <span className="font-mono font-black text-xl text-[#112a52]">{receiptData.priceReference ? `$ ${receiptData.priceReference.amount} USD` : `${receiptData.currency==='HNL'?'L ':''}${receiptData.amount} ${receiptData.currency}`}</span>
                     </div>
                     {receiptData.priceReference && <p className="col-span-2 text-xs leading-relaxed text-slate-600" data-testid="receipt-conversion">
-                      {lang==='es'?'Débito realizado':'Amount charged'}: L {receiptData.amount} {receiptData.currency}. {lang==='es'?'Tipo de cambio':'Exchange rate'}: L {Number(receiptData.priceReference.hnlPerUsd)} / USD.
+                      {liveSandbox ? (lang==='es'?'Importe de prueba':'Test amount') : (lang==='es'?'Débito realizado':'Amount charged')}: L {receiptData.amount} {receiptData.currency}. {lang==='es'?'Tipo de cambio':'Exchange rate'}: L {Number(receiptData.priceReference.hnlPerUsd)} / USD.
                       {receiptData.priceReference.source === 'BCH' && ` ${lang==='es'?'Fuente':'Source'}: Banco Central de Honduras · ${receiptData.priceReference.rateDate}`}
                     </p>}
                   </div>

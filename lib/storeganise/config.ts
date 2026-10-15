@@ -9,14 +9,23 @@ export class StoreganiseIntegrationError extends Error {
 export function assertStoreganiseEnabled() {
   if (process.env.STOREGANISE_PAY_ENABLED !== 'true') throw new StoreganiseIntegrationError('STOREGANISE_PAY_DISABLED', 503);
   const { url } = storeganiseConfiguration();
-  if (gatewayEnvironment() === 'sandbox' && !url.hostname.endsWith('.storeganise.dev')) {
-    // A fake bank approval must never pay a real invoice or activate a real unit.
+  const environment = gatewayEnvironment();
+  const liveSandbox = environment === 'sandbox' && url.hostname.endsWith('.storeganise.com');
+  if (liveSandbox && process.env.STOREGANISE_LIVE_SANDBOX_ENABLED !== 'true') {
     throw new StoreganiseIntegrationError('STOREGANISE_SANDBOX_INSTANCE_REQUIRED', 503);
   }
-  if (gatewayEnvironment() === 'production' && !url.hostname.endsWith('.storeganise.com')) {
+  if (environment === 'production' && !url.hostname.endsWith('.storeganise.com')) {
     throw new StoreganiseIntegrationError('STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH', 503);
   }
-  return { url, environment: gatewayEnvironment() };
+  return { url, environment, liveSandbox };
+}
+
+export function assertStoreganiseTestCustomer(customerId: string) {
+  if (gatewayEnvironment() !== 'sandbox') return;
+  const allowed = (process.env.STOREGANISE_TEST_CUSTOMER_IDS ?? '').split(',').map(value => value.trim());
+  if (!allowed.includes(customerId)) {
+    throw new StoreganiseIntegrationError('STOREGANISE_SANDBOX_CUSTOMER_NOT_ALLOWED', 403);
+  }
 }
 
 export function validateEventOrigin(apiUrl: unknown) {

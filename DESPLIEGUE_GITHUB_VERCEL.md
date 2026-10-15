@@ -1,6 +1,6 @@
 ﻿# Publicar Pay en GitHub y Vercel
 
-Actualización del 13 de octubre de 2026: código preparado para desplegar y configurar. No se ejecutaron pruebas ni compilación de esta actualización. No se ha publicado desde esta sesión.
+Actualización del 15 de octubre de 2026: se admite Storeganise real con CyberSource sandbox, mediante habilitación explícita y clientes autorizados. Verificado localmente con servicios simulados, TypeScript y ESLint; sin iniciar el servidor ni realizar operaciones bancarias.
 
 ## GitHub
 
@@ -21,9 +21,25 @@ Subir los archivos fuente, pnpm-lock.yaml, vercel.json y la documentación media
 | Banco | CYBERSOURCE_ENVIRONMENT, CYBERSOURCE_MERCHANT_ID, CYBERSOURCE_KEY_ID, CYBERSOURCE_SHARED_SECRET |
 | Cambio | BCH_API_KEY, BCH_API_URL, BCH_INDICADOR_ID |
 | Storeganise | STOREGANISE_PAY_ENABLED, STOREGANISE_API_URL, STOREGANISE_API_KEY, STOREGANISE_WEBHOOK_SECRET |
+| Acceso y pruebas | STOREGANISE_BRIDGE_ENABLED, STOREGANISE_LIVE_SANDBOX_ENABLED, STOREGANISE_TEST_CUSTOMER_IDS |
 | Registro y entrada | STOREGANISE_CARD_PAYMENT_METHOD=card, STOREGANISE_COMPLETE_PAID_INVOICE_STEP=true |
 
 Todas son variables privadas del servidor, sin prefijo NEXT_PUBLIC_. PostgreSQL requiere TLS válido y permisos para las migraciones aditivas de lib/pay/schema.ts, que se aplican al primer acceso. El código no elimina los registros anteriores.
+
+Para conservar el acceso actual desde Storeganise real y probar con CyberSource sandbox:
+
+```dotenv
+CYBERSOURCE_ENVIRONMENT=sandbox
+STOREGANISE_LIVE_SANDBOX_ENABLED=true
+STOREGANISE_TEST_CUSTOMER_IDS=ID_REAL_DEL_CLIENTE_AUTORIZADO_PARA_PRUEBAS
+STOREGANISE_PAY_ENABLED=true
+STOREGANISE_BRIDGE_ENABLED=true
+STOREGANISE_API_URL=https://roatanselfstorage.storeganise.com/api/v1/admin
+PAY_SANDBOX_MANUAL_ENABLED=false
+PAY_DEMO_ENABLED=false
+```
+
+Reemplazar el ID por el identificador de 24 caracteres del usuario en Storeganise; para varios usuarios, separarlos con comas. La tarjeta sigue siendo de entrada manual: `PAY_SANDBOX_MANUAL_ENABLED` controla el formulario de importes de prueba, no los campos de tarjeta. Mantener las credenciales de Storeganise y usar credenciales CyberSource válidas para sandbox. Guardar las variables en el ámbito Production de Vercel, redesplegar y volver a abrir Pay desde Storeganise para obtener una sesión sandbox nueva. No cambiar GTM. La aprobación se guarda en Pay sin registrar un pago real en Storeganise, activar bodegas ni emitir una factura fiscal por ese pago de prueba.
 
 Para el formulario manual de sandbox:
 
@@ -33,9 +49,10 @@ Para el formulario manual de sandbox:
     STOREGANISE_PAY_ENABLED=false
     STOREGANISE_TEST_CUSTOMER_IDS=manual-sandbox-customer
 
-Para el recorrido Storeganise real, cuando corresponda habilitarlo:
+Para cobros reales posteriores, cuando corresponda habilitarlos:
 
     CYBERSOURCE_ENVIRONMENT=production
+    STOREGANISE_LIVE_SANDBOX_ENABLED=false
     PAY_SANDBOX_MANUAL_ENABLED=false
     PAY_DEMO_ENABLED=false
     STOREGANISE_PAY_ENABLED=true
@@ -43,7 +60,7 @@ Para el recorrido Storeganise real, cuando corresponda habilitarlo:
     STOREGANISE_CARD_PAYMENT_METHOD=card
     STOREGANISE_COMPLETE_PAID_INVOICE_STEP=true
 
-Se conservan las credenciales BAC existentes; el código selecciona api.cybersource.com con production. Cambiar el host no confirma que el banco haya habilitado el acceso. La configuración local no se cambió de sandbox en esta actualización.
+El código selecciona api.cybersource.com con production. Cambiar el host no confirma que el banco haya habilitado el acceso de esas credenciales. Esta actualización no modifica `.env.local` ni las variables de Vercel.
 
 ## Recuperación de pendientes
 

@@ -8,6 +8,7 @@ import { verifyStoreganiseCheckout } from '@/lib/storeganise/checkout';
 import { StoreganiseIntegrationError } from '@/lib/storeganise/config';
 import { StoreganiseApiError } from '@/lib/storeganise/client';
 import { billToSchema } from '@/lib/pay/billing-details';
+import { isLiveStoreganiseSandbox } from '@/lib/storeganise/payment-policy';
 
 export const runtime = 'nodejs';
 export const maxDuration = 45;
@@ -22,7 +23,7 @@ export async function POST(req: NextRequest) {
     const body = paymentRequestSchema.safeParse(await req.json());
     if (!body.success || !session.capture_context) return NextResponse.json({ error: 'INVALID_PAYMENT_DATA' }, { status: 400 });
     const data = body.data;
-    if (session.storeganise_context?.kind === 'reservation' &&
+    if (!isLiveStoreganiseSandbox(session) && session.storeganise_context?.kind === 'reservation' &&
       !['signed-checkout','profile-bridge'].includes(session.storeganise_context.reservationAuthentication ?? '') && data.confirmReservation !== true) {
       return NextResponse.json({error:'STOREGANISE_RESERVATION_CONFIRMATION_REQUIRED'},{status:400});
     }

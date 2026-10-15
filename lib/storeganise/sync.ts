@@ -4,6 +4,7 @@ import type { SessionRow } from '../pay/types';
 import { assertStoreganiseEnabled, StoreganiseIntegrationError } from './config';
 import { assertOrderActive, getInvoice, getJob, getUnit, invoiceContext } from './records';
 import { storeganiseRequest, StoreganiseApiError } from './client';
+import { storeganisePaymentWritesAllowed } from './payment-policy';
 
 interface Delivery {
   session_id: string; transaction_id: string; attempt_count: number;
@@ -34,14 +35,20 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
     lease_until=now()+interval '3 minutes',status='sending',attempt_count=attempt_count+1,updated_at=now()
     FROM pay_sessions s WHERE d.session_id=s.id AND d.session_id=$1 AND s.status='succeeded'
       AND s.storeganise_context IS NOT NULL AND s.is_demo=false AND s.checkout_source='storeganise'
-      AND s.gateway_transaction_id=d.transaction_id AND d.status<>'active'
+      AND s.gateway_transaction_id=d.transaction_id AND d.status NOT IN ('active','sandbox_only')
       AND d.next_attempt_at<=now() AND (d.lease_until IS NULL OR d.lease_until<now()) RETURNING d.*`, [sessionId,lease]);
   const delivery = claimed.rows[0];
   if (!delivery) return;
   try {
-    const { url, environment } = assertStoreganiseEnabled();
     const stored = await query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1', [sessionId]);
     const session = stored.rows[0];
+    // Also stops legacy/queued sandbox deliveries after configuration changes.
+    // This check precedes every Storeganise call and cannot be enabled by a flag.
+    if (!storeganisePaymentWritesAllowed(session)) {
+      await saveProgress(delivery, 'sandbox_only');
+      return;
+    }
+    const { url, environment } = assertStoreganiseEnabled();
     const binding = session.storeganise_context;
     if (!binding || !binding.invoiceId || !binding.rentalId || binding.kind === 'reservation' || binding.apiOrigin !== url.origin || session.environment !== environment ||
       binding.customerId !== session.customer_id || binding.invoiceId !== session.invoice_id ||
@@ -121,7 +128,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
 export async function retryDueStoreganiseDeliveries() {
   if (process.env.STOREGANISE_PAY_ENABLED !== 'true') return;
   const due = await query<{session_id:string}>(`SELECT session_id FROM storeganise_deliveries
-    WHERE status<>'active' AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now())
+    WHERE status NOT IN ('active','sandbox_only') AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now())
     ORDER BY next_attempt_at LIMIT 3`);
   await Promise.allSettled(due.rows.map(row => syncStoreganiseSession(row.session_id)));
 }
@@ -130,7 +137,7 @@ export async function retryDueStoreganiseDeliveries() {
 export async function wakeStoreganiseDeliveries(ids: {invoiceId?: string; jobId?: string; unitId?: string; unitRentalId?: string}) {
   if (!Object.values(ids).some(Boolean)) return;
   await query(`UPDATE storeganise_deliveries d SET next_attempt_at=now(),status=CASE WHEN d.status='active' THEN 'pending' ELSE d.status END FROM pay_sessions s
-    WHERE d.session_id=s.id AND s.status='succeeded' AND s.storeganise_context IS NOT NULL
+    WHERE d.session_id=s.id AND s.status='succeeded' AND s.storeganise_context IS NOT NULL AND d.status<>'sandbox_only'
       AND (($1::text IS NOT NULL AND s.invoice_id=$1) OR ($2::text IS NOT NULL AND s.storeganise_context->>'jobId'=$2)
         OR ($3::text IS NOT NULL AND s.unit_id=$3) OR ($4::text IS NOT NULL AND s.storeganise_context->>'rentalId'=$4))`,
   [ids.invoiceId??null,ids.jobId??null,ids.unitId??null,ids.unitRentalId??null]);

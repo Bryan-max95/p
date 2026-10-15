@@ -10,7 +10,8 @@ import { loadCredentials } from './credentials';
 import { needsLegacyPaymentReview } from './payment-state';
 import { paymentFailureCode } from './payment-feedback';
 import { billToSchema } from './billing-details';
-import { StoreganiseIntegrationError, storeganiseReturnUrl } from '../storeganise/config';
+import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganiseReturnUrl } from '../storeganise/config';
+import { isLiveStoreganiseSandbox, storeganisePaymentWritesAllowed } from '../storeganise/payment-policy';
 import type { BchRate } from './bch';
 
 const sha = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
@@ -29,6 +30,12 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
   if (!money(input.amount) || !['USD', 'HNL'].includes(input.currency)) throw new Error('Invalid definitive amount');
   const allowed = new Set((process.env.STOREGANISE_TEST_CUSTOMER_IDS ?? '').split(',').map(v => v.trim()).filter(Boolean));
   if (environment === 'sandbox' && !allowed.has(input.customerId)) throw new Error('Customer is not allowlisted for sandbox');
+  const liveSandbox = isLiveStoreganiseSandbox({ environment, storeganise_context: input.storeganiseContext });
+  if (liveSandbox) {
+    const config = assertStoreganiseEnabled();
+    if (source !== 'storeganise' || input.storeganiseContext?.apiOrigin !== config.url.origin ||
+      input.storeganiseContext.customerId !== input.customerId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+  }
   if (!input.invoiceId && !input.orderId) throw new Error('Verified invoice or order required');
   const publicUrl = requiredUrl('PAY_PUBLIC_URL');
   if (environment === 'production') {
@@ -58,7 +65,7 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
     (id,event_id,launch_hash,customer_id,order_id,invoice_id,unit_id,client_name,unit_name,concept,currency,amount,bill_to,environment,return_url,expires_at,is_demo,portal_status,reference_usd_amount,usd_hnl_rate,fx_source,fx_rate_date,fx_fetched_at,checkout_source,storeganise_context,storeganise_status)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$22,$14,now()+interval '30 minutes',$15,$16,$17,$18,$19,$20,$21,$23,$24,$25)
     ON CONFLICT(event_id) DO UPDATE SET updated_at=now() RETURNING *`,
-    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',rate ? input.amount : null,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,input.storeganiseContext ? JSON.stringify(input.storeganiseContext) : null,input.storeganiseContext ? 'waiting_payment' : 'disabled']);
+    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',rate ? input.amount : null,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,input.storeganiseContext ? JSON.stringify(input.storeganiseContext) : null,liveSandbox ? 'sandbox_only' : input.storeganiseContext ? 'waiting_payment' : 'disabled']);
   return sessionResult(result.rows[0]);
 }
 
@@ -82,6 +89,7 @@ export async function getSession(accessToken: string) {
 }
 
 export function publicSession(row: SessionRow) {
+  const liveSandbox = isLiveStoreganiseSandbox(row);
   const legacyReview = needsLegacyPaymentReview(row);
   const status = legacyReview ? 'unknown' : ['open','declined'].includes(row.status) && row.expires_at.getTime() <= Date.now() ? 'expired' : row.status;
   const priceReference = row.currency === 'HNL' && row.reference_usd_amount != null && row.usd_hnl_rate != null ? {
@@ -93,9 +101,9 @@ export function publicSession(row: SessionRow) {
     authenticationPending: row.status==='pending' && ['DEVICE_COLLECTION_REQUIRED','CHALLENGE_REQUIRED'].includes(row.gateway_status ?? ''),
     ...(['declined', 'unknown'].includes(status) ? { failureCode: legacyReview ? 'PAYMENT_NOT_CONFIRMED' : paymentFailureCode(row.failure_reason, row.gateway_status) } : {}),
     ...(row.storeganise_context ? {
-      requiresReservationConfirmation: row.storeganise_context.kind === 'reservation' &&
+      requiresReservationConfirmation: !liveSandbox && row.storeganise_context.kind === 'reservation' &&
         !['signed-checkout','profile-bridge'].includes(row.storeganise_context.reservationAuthentication ?? ''),
-      storeganise: { status: row.storeganise_status ?? 'waiting_payment', paymentId: row.storeganise_payment_id ?? undefined,
+      storeganise: { status: liveSandbox ? 'sandbox_only' : row.storeganise_status ?? 'waiting_payment', paymentId: liveSandbox ? undefined : row.storeganise_payment_id ?? undefined,
         returnUrl: storeganiseReturnUrl(row.return_url) },
       billingRequired: !billToSchema.safeParse(row.bill_to).success,
       billingDetails: row.bill_to,
@@ -114,6 +122,11 @@ export async function beginAttempt(sessionId:string, tokenJti?:string, mode: 'pa
      throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
    }
    if (session.environment !== gatewayEnvironment()) throw new Error('Session belongs to a different gateway environment');
+   if (isLiveStoreganiseSandbox(session)) {
+     const config = assertStoreganiseEnabled();
+     assertStoreganiseTestCustomer(session.customer_id);
+     if (session.storeganise_context?.apiOrigin !== config.url.origin) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+   }
    if (session.environment === 'production') {
      if (session.is_demo || mode !== 'payment') throw new Error('Test attempts cannot use production');
      await loadCredentials('production');
@@ -176,7 +189,7 @@ export async function finishAttempt(attemptId:string,result:{status:string;trans
    if(current.rows[0].status==='declined'&&status!=='declined')throw new Error('Cannot overwrite a closed attempt');
    const a=await client.query<{session_id:string}>('UPDATE pay_attempts SET status=$2,gateway_transaction_id=COALESCE($3,gateway_transaction_id),gateway_status=$4,response=$5,updated_at=now() WHERE id=$1 RETURNING session_id',[attemptId,status,result.transactionId??null,result.gatewayStatus,JSON.stringify(result.response??{})]);
    const sid=a.rows[0].session_id; await client.query(`UPDATE pay_sessions SET status=$2,gateway_transaction_id=COALESCE($3,gateway_transaction_id),authorization_code=COALESCE($4,authorization_code),card_brand=COALESCE($5,card_brand),card_last4=COALESCE($6,card_last4),gateway_status=$7,failure_reason=$8,paid_at=CASE WHEN $2='succeeded' THEN now() ELSE paid_at END,updated_at=now() WHERE id=$1`,[sid,status,result.transactionId??null,result.authorizationCode??null,result.brand??null,result.last4??null,result.gatewayStatus,result.reason??null]);
-   if(status==='succeeded' && session.rows[0].storeganise_context && !session.rows[0].is_demo) {
+   if(status==='succeeded' && session.rows[0].storeganise_context && !session.rows[0].is_demo && storeganisePaymentWritesAllowed(session.rows[0])) {
      await client.query(`INSERT INTO storeganise_deliveries(session_id,transaction_id)
        VALUES($1,$2) ON CONFLICT(session_id) DO NOTHING`, [sid,result.transactionId]);
      await client.query("UPDATE pay_sessions SET storeganise_status='pending',portal_status='disabled' WHERE id=$1 AND storeganise_status='waiting_payment'", [sid]);

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { z } from 'zod';
 import { query, transaction } from '../pay/db';
-import { assertStoreganiseEnabled, StoreganiseIntegrationError } from './config';
+import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError } from './config';
 import { storeganiseGet, storeganiseRequest } from './client';
 import { getJob, getUser, assertOrderActive } from './records';
 import { matchingOrderId, storeganiseBookingReturn } from './browser-entry';
@@ -35,6 +35,7 @@ export async function limitBridgeRequests(ip: string) {
  */
 export async function prepareProfileBridge(input: Extract<z.infer<typeof bridgeInput>, { operation: 'prepare' }>) {
   const { url, environment, secret } = configuration();
+  assertStoreganiseTestCustomer(input.userId);
   const job = await getJob(input.orderId);
   if (job.type !== 'unit_moveIn' || job.ownerId !== input.userId) throw new StoreganiseIntegrationError('STOREGANISE_BRIDGE_ACCESS_INVALID', 403);
   assertOrderActive(job);
@@ -91,6 +92,7 @@ export async function redeemProfileBridge(input: Extract<z.infer<typeof bridgeIn
   const grant = await transaction(async client => {
     const record = (await client.query<BridgeGrant>('SELECT * FROM pay_storeganise_bridge_grants WHERE id=$1 FOR UPDATE', [input.grantId])).rows[0];
     assertBridgeProof(record, input, expected);
+    assertStoreganiseTestCustomer(record.customer_id);
     if (record.lease_until && record.lease_until.getTime() > Date.now()) throw new StoreganiseIntegrationError('STOREGANISE_BRIDGE_BUSY', 409);
     await client.query(`UPDATE pay_storeganise_bridge_grants SET client_hash=$2,lease_token=$3,
       lease_until=now()+interval '90 seconds' WHERE id=$1`, [record.id, bridgeHash(input.clientNonce), lease]);

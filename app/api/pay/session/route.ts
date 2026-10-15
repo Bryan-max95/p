@@ -6,6 +6,7 @@ import { reconcileSession } from '@/lib/pay/reconcile';
 import { gatewayEnvironment } from '@/lib/cybersource/environment';
 import { needsLegacyPaymentReview } from '@/lib/pay/payment-state';
 import { syncStoreganiseSession } from '@/lib/storeganise/sync';
+import { storeganisePaymentWritesAllowed } from '@/lib/storeganise/payment-policy';
 export const runtime='nodejs';export const dynamic='force-dynamic';export const maxDuration=60;
 export async function GET(){
   try{
@@ -13,7 +14,7 @@ export async function GET(){
     if(session.environment!==gatewayEnvironment())return NextResponse.json({error:'SESSION_ENVIRONMENT_CHANGED'},{status:409,headers:{'Cache-Control':'no-store'}});
     const updated=['processing','pending','unknown'].includes(session.status)||needsLegacyPaymentReview(session)?await reconcileSession(session.id):undefined;
     const current=updated??session;
-    if(current.status==='succeeded'&&current.storeganise_context&&current.storeganise_status!=='active'){
+    if(current.status==='succeeded'&&storeganisePaymentWritesAllowed(current)&&current.storeganise_status!=='active'){
       after(async()=>{try{await syncStoreganiseSession(current.id);}catch{/* The durable queue retains this delivery. */}});
     }
     return NextResponse.json({session:publicSession(current)},{headers:{'Cache-Control':'no-store'}});

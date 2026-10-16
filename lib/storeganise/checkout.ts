@@ -76,6 +76,7 @@ export async function openStoreganiseCheckout(value: unknown) {
       if (reservation) {
         if (!['open','declined'].includes(session.status) || needsLegacyPaymentReview(session)) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_REFRESH_REQUIRED');
         assertPayable(context);
+        binding.sandboxActivation = session.storeganise_context.sandboxActivation;
         session = (await client.query<SessionRow>(`UPDATE pay_sessions SET invoice_id=$2,unit_id=$3,unit_name=$4,
           storeganise_context=$5,updated_at=now() WHERE id=$1 RETURNING *`,
         [session.id,invoice.id,unit.id,unit.name,JSON.stringify(binding)])).rows[0];

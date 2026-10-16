@@ -97,6 +97,8 @@ test('customer messages distinguish bank declines, malformed requests and partia
     assert.equal(paymentFailureCode('private-provider-message', 'anything'), 'PAYMENT_NOT_CONFIRMED');
     const declined = paymentFailureMessage(paymentFailureCode('DCARDREFUSED', 'AUTHORIZATION_DECLINED_203'), undefined, language);
     assert.match(declined, language === 'es' ? /rechazado/ : /declined/);
+    const funds = paymentFailureMessage(paymentFailureCode('INSUFFICIENT_FUND', 'DECLINED'), undefined, language);
+    assert.match(funds, language === 'es' ? /fondos insuficientes/ : /insufficient funds/);
   }
 });
 

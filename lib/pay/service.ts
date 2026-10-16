@@ -11,7 +11,7 @@ import { needsLegacyPaymentReview } from './payment-state';
 import { paymentFailureCode } from './payment-feedback';
 import { billToSchema } from './billing-details';
 import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganiseReturnUrl } from '../storeganise/config';
-import { isLiveStoreganiseSandbox, storeganisePaymentWritesAllowed } from '../storeganise/payment-policy';
+import { hasSandboxActivation, isLiveStoreganiseSandbox, storeganisePaymentWritesAllowed } from '../storeganise/payment-policy';
 import type { BchRate } from './bch';
 
 const sha = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
@@ -30,6 +30,13 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
   if (!money(input.amount) || !['USD', 'HNL'].includes(input.currency)) throw new Error('Invalid definitive amount');
   const allowed = new Set((process.env.STOREGANISE_TEST_CUSTOMER_IDS ?? '').split(',').map(v => v.trim()).filter(Boolean));
   const liveSandbox = isLiveStoreganiseSandbox({ environment, storeganise_context: input.storeganiseContext });
+  const binding = input.storeganiseContext ? { ...input.storeganiseContext } : undefined;
+  if (binding) {
+    delete binding.sandboxActivation;
+    if (liveSandbox && !input.isDemo && source === 'storeganise' && process.env.STOREGANISE_SANDBOX_ACTIVATION_ENABLED === 'true') {
+      binding.sandboxActivation = 'live-storeganise-v1';
+    }
+  }
   if (environment === 'sandbox' && !liveSandbox && !allowed.has(input.customerId)) throw new Error('Customer is not allowlisted for sandbox');
   if (liveSandbox) {
     const config = assertStoreganiseEnabled();
@@ -65,7 +72,7 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
     (id,event_id,launch_hash,customer_id,order_id,invoice_id,unit_id,client_name,unit_name,concept,currency,amount,bill_to,environment,return_url,expires_at,is_demo,portal_status,reference_usd_amount,usd_hnl_rate,fx_source,fx_rate_date,fx_fetched_at,checkout_source,storeganise_context,storeganise_status)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$22,$14,now()+interval '30 minutes',$15,$16,$17,$18,$19,$20,$21,$23,$24,$25)
     ON CONFLICT(event_id) DO UPDATE SET updated_at=now() RETURNING *`,
-    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',rate ? input.amount : null,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,input.storeganiseContext ? JSON.stringify(input.storeganiseContext) : null,liveSandbox ? 'sandbox_only' : input.storeganiseContext ? 'waiting_payment' : 'disabled']);
+    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',rate ? input.amount : null,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled']);
   return sessionResult(result.rows[0]);
 }
 
@@ -90,6 +97,7 @@ export async function getSession(accessToken: string) {
 
 export function publicSession(row: SessionRow) {
   const liveSandbox = isLiveStoreganiseSandbox(row);
+  const isolatedSandbox = liveSandbox && !hasSandboxActivation(row);
   const legacyReview = needsLegacyPaymentReview(row);
   const status = legacyReview ? 'unknown' : ['open','declined'].includes(row.status) && row.expires_at.getTime() <= Date.now() ? 'expired' : row.status;
   const priceReference = row.currency === 'HNL' && row.reference_usd_amount != null && row.usd_hnl_rate != null ? {
@@ -103,7 +111,8 @@ export function publicSession(row: SessionRow) {
     ...(row.storeganise_context ? {
       requiresReservationConfirmation: !liveSandbox && row.storeganise_context.kind === 'reservation' &&
         !['signed-checkout','profile-bridge'].includes(row.storeganise_context.reservationAuthentication ?? ''),
-      storeganise: { status: liveSandbox ? 'sandbox_only' : row.storeganise_status ?? 'waiting_payment', paymentId: liveSandbox ? undefined : row.storeganise_payment_id ?? undefined,
+      storeganise: { status: isolatedSandbox ? 'sandbox_only' : row.storeganise_status ?? 'waiting_payment', paymentId: isolatedSandbox ? undefined : row.storeganise_payment_id ?? undefined,
+        sandboxActivation: hasSandboxActivation(row),
         returnUrl: storeganiseReturnUrl(row.return_url) },
       billingRequired: !billToSchema.safeParse(row.bill_to).success,
       billingDetails: row.bill_to,

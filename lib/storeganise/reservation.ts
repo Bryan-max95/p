@@ -135,6 +135,7 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
       const existingBinding = session.storeganise_context;
       if (!existingBinding || session.customer_id !== customerId || existingBinding.apiOrigin !== url.origin ||
         existingBinding.jobId !== job.id) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+      binding.sandboxActivation = existingBinding.sandboxActivation;
       if (existingBinding.reservationAuthentication === 'signed-checkout' || existingBinding.reservationAuthentication === 'profile-bridge') {
         binding.reservationAuthentication = existingBinding.reservationAuthentication;
       }

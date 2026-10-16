@@ -184,6 +184,8 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
 
   const payment = usePaymentSession(manualSandboxEnabled);
   const liveSandbox = payment.session?.storeganise?.status === 'sandbox_only';
+  const sandboxActivation = payment.session?.storeganise?.sandboxActivation === true;
+  const simulatedPayment = payment.session?.environment === 'sandbox';
   const [manual, setManual] = useState({ unitName: '', clientName: '', amount: '' });
   const manualEntry = !payment.session;
   const unitNumber = payment.session?.unitName ?? manual.unitName;
@@ -195,8 +197,8 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
   const referenceAmount = priceReference?.amount ?? (manualEntry ? manual.amount : payment.session?.currency === 'USD' ? amount : '');
   const displayLabel = manualEntry ? (manual.amount ? `$ ${manual.amount} USD` : '— USD') : referenceAmount ? `$ ${referenceAmount} USD` : chargeLabel;
   const exchangeNotice = priceReference ? (lang === 'es'
-    ? `${liveSandbox ? 'Importe de prueba:' : 'Se debitarán'} ${chargeLabel}${liveSandbox ? '. Sin cobro real.' : ' de su tarjeta.'} Tipo de cambio: L ${Number(priceReference.hnlPerUsd)} por USD 1.`
-    : `${liveSandbox ? 'Test amount:' : 'Your card will be charged'} ${chargeLabel}.${liveSandbox ? ' No real charge.' : ''} Exchange rate: L ${Number(priceReference.hnlPerUsd)} per USD 1.`) : '';
+    ? `${simulatedPayment ? 'Importe de prueba:' : 'Se debitarán'} ${chargeLabel}${simulatedPayment ? '. Sin cobro real.' : ' de su tarjeta.'} Tipo de cambio: L ${Number(priceReference.hnlPerUsd)} por USD 1.`
+    : `${simulatedPayment ? 'Test amount:' : 'Your card will be charged'} ${chargeLabel}.${simulatedPayment ? ' No real charge.' : ''} Exchange rate: L ${Number(priceReference.hnlPerUsd)} per USD 1.`) : '';
   const rateSource = priceReference?.source === 'BCH' ? `${lang === 'es' ? 'Fuente: Banco Central de Honduras' : 'Source: Banco Central de Honduras'} · ${priceReference.rateDate}` : '';
 
   // Form State - Card Details (Step 2)
@@ -547,6 +549,11 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
             {lang === 'es'
               ? 'Modo de prueba. Ingrese una tarjeta de prueba de CyberSource. La reserva y el monto vienen de Storeganise; esta operación no realiza un cobro real ni activa su bodega.'
               : 'Test mode. Enter a CyberSource test card. The booking and amount come from Storeganise; this transaction does not charge real money or activate your unit.'}
+          </p>}
+          {sandboxActivation && <p className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950" role="status">
+            {lang === 'es'
+              ? 'Prueba bancaria con activación de bodega. Use una tarjeta de prueba de CyberSource. La aprobación registrará el pago de prueba en su reserva real de Storeganise y solicitará la activación, sin ingreso bancario.'
+              : 'Bank test with unit activation. Use a CyberSource test card. Approval will record the test payment against your real Storeganise booking and request activation, without a bank settlement.'}
           </p>}
           <AnimatePresence mode="wait">
             
@@ -932,7 +939,9 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                     : payment.session.storeganise.status==='active'
                     ? (lang==='es'?'Pago aplicado y bodega habilitada. Puede regresar a su cuenta.':'Payment applied and unit available. You can return to your account.')
                     : payment.session.storeganise.status==='awaiting_move_in'
-                      ? (lang==='es'?'Pago aplicado en Storeganise. La habilitación de la bodega está pendiente de completar la entrada.':'Payment applied in Storeganise. Your unit is awaiting move-in completion.')
+                      ? (lang==='es'?'Pago registrado en Storeganise. Estamos confirmando la activación de su bodega. No vuelva a pagar.':'Payment recorded in Storeganise. We are confirming your unit activation. Do not pay again.')
+                      : payment.session.storeganise.status==='awaiting_reservation'
+                        ? (lang==='es'?'Transacción aprobada. Estamos confirmando su reserva y preparando el registro en Storeganise. No vuelva a pagar.':'Transaction approved. We are confirming your booking and preparing its Storeganise payment record. Do not pay again.')
                       : payment.session.storeganise.status==='review'
                         ? (lang==='es'?'Su pago está confirmado. El registro o la habilitación necesita revisión de Roatan Self Storage. Conserve este comprobante y no vuelva a pagar.':'Your payment is confirmed. Registration or activation needs review by Roatan Self Storage. Keep this receipt and do not pay again.')
                         : (lang==='es'?'Estamos registrando su pago en Storeganise. No vuelva a pagar; la confirmación se actualizará automáticamente.':'We are registering your payment in Storeganise. Do not pay again; confirmation will update automatically.')}</p>
@@ -980,7 +989,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                       <span className="font-mono font-black text-xl text-[#112a52]">{receiptData.priceReference ? `$ ${receiptData.priceReference.amount} USD` : `${receiptData.currency==='HNL'?'L ':''}${receiptData.amount} ${receiptData.currency}`}</span>
                     </div>
                     {receiptData.priceReference && <p className="col-span-2 text-xs leading-relaxed text-slate-600" data-testid="receipt-conversion">
-                      {liveSandbox ? (lang==='es'?'Importe de prueba':'Test amount') : (lang==='es'?'Débito realizado':'Amount charged')}: L {receiptData.amount} {receiptData.currency}. {lang==='es'?'Tipo de cambio':'Exchange rate'}: L {Number(receiptData.priceReference.hnlPerUsd)} / USD.
+                      {simulatedPayment ? (lang==='es'?'Importe de prueba':'Test amount') : (lang==='es'?'Débito realizado':'Amount charged')}: L {receiptData.amount} {receiptData.currency}. {lang==='es'?'Tipo de cambio':'Exchange rate'}: L {Number(receiptData.priceReference.hnlPerUsd)} / USD.
                       {receiptData.priceReference.source === 'BCH' && ` ${lang==='es'?'Fuente':'Source'}: Banco Central de Honduras · ${receiptData.priceReference.rateDate}`}
                     </p>}
                   </div>

@@ -76,6 +76,12 @@ CREATE TABLE IF NOT EXISTS storeganise_deliveries (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS storeganise_delivery_due ON storeganise_deliveries(status,next_attempt_at);
+CREATE TABLE IF NOT EXISTS storeganise_step_operations (
+  session_id uuid NOT NULL REFERENCES pay_sessions(id), job_id text NOT NULL, step_id text NOT NULL,
+  step_type text NOT NULL, status text NOT NULL DEFAULT 'started',
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY(session_id,job_id,step_id)
+);
 CREATE TABLE IF NOT EXISTS pay_launch_links (
   token_hash text PRIMARY KEY, session_id uuid NOT NULL REFERENCES pay_sessions(id),
   expires_at timestamptz NOT NULL, consumed_at timestamptz, created_at timestamptz NOT NULL DEFAULT now()

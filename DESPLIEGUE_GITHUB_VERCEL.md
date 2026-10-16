@@ -1,6 +1,6 @@
 ﻿# Publicar Pay en GitHub y Vercel
 
-Actualización del 15 de octubre de 2026: se admite Storeganise real con CyberSource sandbox, mediante habilitación explícita para todos los clientes autenticados, sin lista de IDs. Las pruebas aprobadas se pueden repetir conservando el historial. Verificado localmente con servicios simulados, TypeScript y ESLint; sin iniciar el servidor ni realizar operaciones bancarias.
+Actualización del 16 de octubre de 2026: la configuración solicitada registra aprobaciones sandbox y activa la bodega real, con `STOREGANISE_SANDBOX_ACTIVATION_ENABLED=true` en checkouts nuevos. Consultar [activación, efectos y recuperación](ACTIVACION_STOREGANISE.md). Sin esa variable permanece el modo aislado descrito a continuación. Las verificaciones son locales, con servicios simulados; no se iniciaron el servidor ni operaciones bancarias.
 
 ## GitHub
 
@@ -26,7 +26,7 @@ Subir los archivos fuente, pnpm-lock.yaml, vercel.json y la documentación media
 
 Todas son variables privadas del servidor, sin prefijo NEXT_PUBLIC_. PostgreSQL requiere TLS válido y permisos para las migraciones aditivas de lib/pay/schema.ts, que se aplican al primer acceso. El código no elimina los registros anteriores.
 
-Para conservar el acceso actual desde Storeganise real y probar con CyberSource sandbox:
+Para conservar el acceso desde Storeganise real y probar con CyberSource sandbox sin activar bodegas:
 
 ```dotenv
 CYBERSOURCE_ENVIRONMENT=sandbox

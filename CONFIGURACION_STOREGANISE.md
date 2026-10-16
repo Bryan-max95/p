@@ -74,7 +74,7 @@ La transacción bancaria confirmada crea una entrega persistente en storeganise_
 
 Campos: type manual, method card (configurable), amount en USD, date y notes. Las notas conservan la referencia única Pay/CyberSource, el cargo HNL y la tasa BCH. Esto aplica el valor original a la factura USD, aunque la tarjeta haya sido cobrada en HNL.
 
-La lectura posterior debe encontrar ese registro y saldo cero con estado paid. Con STOREGANISE_COMPLETE_PAID_INVOICE_STEP=true se completa exclusivamente el paso invoice_createInitial que esté ready y apunte a esa factura:
+La lectura posterior debe encontrar ese registro y saldo cero con estado paid. Con STOREGANISE_COMPLETE_PAID_INVOICE_STEP=true se completa el paso de factura conocido que esté ready y apunte a esa factura, y después el paso final de ocupación (`await_confirmMovedIn` o `confirm_occupy`):
 
     PUT /api/v1/admin/jobs/{jobId}/steps/{stepId}
     {"state":"completed"}
@@ -86,7 +86,8 @@ La bodega solo se muestra habilitada cuando Storeganise devuelve state occupied,
 | Estado | Significado |
 | --- | --- |
 | pending / retry | Cobro guardado; entrega a Storeganise pendiente. |
-| awaiting_move_in | Pago aplicado; todavía falta completar la entrada. |
+| awaiting_reservation | Aprobación guardada; se está confirmando la reserva y su factura interna. |
+| awaiting_move_in | Pago aplicado; ocupación todavía no confirmada por Storeganise. |
 | active | Pago aplicado y ocupación comprobada para ese cliente. |
 | review | Se requiere revisión del registro o de la entrada; no repetir el cargo. |
 
@@ -98,9 +99,9 @@ Para un estado review, revisar storeganise_deliveries.last_error y la referencia
 
 Producción: CYBERSOURCE_ENVIRONMENT=production, API de Storeganise .storeganise.com y STOREGANISE_PAY_ENABLED=true.
 
-Sandbox: CYBERSOURCE_ENVIRONMENT=sandbox, instancia aislada .storeganise.dev y IDs reales de prueba en STOREGANISE_TEST_CUSTOMER_IDS. El código bloquea aplicar una aprobación ficticia del banco a la instancia real. El formulario manual sandbox continúa funcionando con STOREGANISE_PAY_ENABLED=false y no registra pagos en Storeganise.
+Sandbox aislado: CYBERSOURCE_ENVIRONMENT=sandbox, instancia .storeganise.dev e IDs de prueba en STOREGANISE_TEST_CUSTOMER_IDS. El formulario manual sandbox continúa funcionando con STOREGANISE_PAY_ENABLED=false y no registra pagos en Storeganise.
 
-Para usar datos de la instancia real `.com` con CyberSource sandbox, habilitar `STOREGANISE_LIVE_SANDBOX_ENABLED=true`. Todos los clientes autenticados pueden usar su propia reserva sin añadir IDs a `STOREGANISE_TEST_CUSTOMER_IDS`. Pay conserva el bridge autenticado, el monto y la conversión BCH, sin enviar la reserva, aplicar pagos reales, completar pasos de ocupación ni activar bodegas con estos resultados de prueba. La única escritura del acceso es el campo temporal del perfil. Después de una aprobación puede repetirse la prueba desde el comprobante, conservando el historial. Consultar [las variables y pasos de Vercel](CONEXION_GTM_STOREGANISE.md) y abrir una sesión nueva desde Storeganise después del despliegue.
+Para usar la instancia real `.com` con CyberSource sandbox, habilitar `STOREGANISE_LIVE_SANDBOX_ENABLED=true`. Todos los clientes autenticados pueden usar su propia reserva sin una lista de IDs. Sin `STOREGANISE_SANDBOX_ACTIVATION_ENABLED=true`, el resultado queda aislado y se puede repetir sin efectos contables. Con esa variable en true, los nuevos checkouts guardan permiso para registrar el pago y completar la ocupación; mantienen una marca explícita SANDBOX y no permiten reiniciar la reserva pagada. Consultar [activación y variables](ACTIVACION_STOREGANISE.md). Las pruebas antiguas no se aplican automáticamente.
 
 Si al perfil le falta una dirección bancaria completa, Pay la solicita antes del cobro. Opcionalmente puede suministrarse un objeto billTo completo en el campo personalizado pay_billTo del usuario; no se inventan direcciones para clientes reales.
 

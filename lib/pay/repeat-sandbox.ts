@@ -1,7 +1,7 @@
 import type { SessionRow } from './types';
 import { transaction } from './db';
 import { assertStoreganiseEnabled, StoreganiseIntegrationError } from '../storeganise/config';
-import { isLiveStoreganiseSandbox } from '../storeganise/payment-policy';
+import { hasSandboxActivation, isLiveStoreganiseSandbox } from '../storeganise/payment-policy';
 import { verifyStoreganiseCheckout } from '../storeganise/checkout';
 
 /** Explicit customer action, only for simulated payments with a live booking.
@@ -9,7 +9,7 @@ import { verifyStoreganiseCheckout } from '../storeganise/checkout';
  * current form. This never creates a bank transaction or a Storeganise payment. */
 export async function repeatSandboxPayment(authenticated: SessionRow, completedTransactionId: string) {
   const { url, liveSandbox } = assertStoreganiseEnabled();
-  if (!liveSandbox || !isLiveStoreganiseSandbox(authenticated) || authenticated.is_demo ||
+  if (!liveSandbox || !isLiveStoreganiseSandbox(authenticated) || hasSandboxActivation(authenticated) || authenticated.is_demo ||
     authenticated.checkout_source !== 'storeganise' || authenticated.storeganise_context?.apiOrigin !== url.origin) {
     throw new StoreganiseIntegrationError('SANDBOX_REPEAT_DISABLED', 403);
   }
@@ -17,7 +17,7 @@ export async function repeatSandboxPayment(authenticated: SessionRow, completedT
   await verifyStoreganiseCheckout(authenticated);
   return transaction(async client => {
     const session = (await client.query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1 FOR UPDATE', [authenticated.id])).rows[0];
-    if (!session || !isLiveStoreganiseSandbox(session) || session.is_demo || session.checkout_source !== 'storeganise' ||
+    if (!session || !isLiveStoreganiseSandbox(session) || hasSandboxActivation(session) || session.is_demo || session.checkout_source !== 'storeganise' ||
       session.customer_id !== authenticated.customer_id || session.unit_id !== authenticated.unit_id ||
       session.order_id !== authenticated.order_id || session.invoice_id !== authenticated.invoice_id ||
       session.storeganise_context?.apiOrigin !== url.origin ||

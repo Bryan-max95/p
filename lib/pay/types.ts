@@ -8,6 +8,8 @@ export interface StoreganiseContext {
   unitTypeId?: string;
   selectedUnitId?: string;
   reservationAuthentication?: 'customer-token' | 'signed-checkout' | 'profile-bridge';
+  // Fixed when a new checkout is created. Never upgrades old sandbox receipts.
+  sandboxActivation?: 'live-storeganise-v1';
 }
 
 export interface CheckoutSessionInput {

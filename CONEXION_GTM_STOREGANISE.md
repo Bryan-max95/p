@@ -70,7 +70,9 @@ Conservar los valores privados de `STOREGANISE_API_KEY`, `PAY_SESSION_TOKEN_SECR
 
 La tabla nueva `pay_storeganise_bridge_grants` se crea mediante el esquema aditivo existente en la primera operación de base de datos. La conexión debe permitir esa migración y usar la base persistente de Pay. No se ejecutó una migración contra la base real durante este cambio.
 
-**Configuración elegida: Storeganise real y CyberSource sandbox.** Para la prueba manual, configurar en Vercel:
+**Actualización del 16 de octubre: activación real tras aprobación sandbox.** Añadir `STOREGANISE_SANDBOX_ACTIVATION_ENABLED=true` y conservar `STOREGANISE_COMPLETE_PAID_INVOICE_STEP=true`. Redesplegar y crear una reserva nueva. El permiso se guarda por sesión y no aplica pruebas históricas. Ver [la configuración completa y el proceso de activación](ACTIVACION_STOREGANISE.md).
+
+**Modo aislado anterior: Storeganise real y CyberSource sandbox sin activar bodegas.** Con `STOREGANISE_SANDBOX_ACTIVATION_ENABLED=false` o ausente, usar:
 
 ```dotenv
 CYBERSOURCE_ENVIRONMENT=sandbox
@@ -124,9 +126,9 @@ Con factura interna, Pay consulta el saldo exacto y su propietario. Sin factura,
 
 El precio se muestra en USD y el cargo se calcula en HNL mediante BCH. Se reutilizan el carrusel, tokenización, 3DS y procesamiento bancario existentes. Si faltan datos obligatorios de dirección en Storeganise, el carrusel conserva su captura; no se inventan ni se solicita la contraseña.
 
-**Abrir una reserva provisional no autoriza a cobrarla.** Antes de cualquier autorización bancaria, Pay vuelve a consultar la reserva y exige su registro contable interno confirmado. Si faltan confirmación, contratos o factura interna, detiene el cobro con `STOREGANISE_RESERVATION_PENDING`. La factura fiscal del Portal es diferente y sigue siendo posterior al pago.
+En producción bancaria, Pay vuelve a consultar la reserva y exige su registro contable interno confirmado antes de cobrar. Con sandbox y activación explícita, revalida el total antes del pago y completa la confirmación de la reserva después de aprobar, vinculando su factura interna antes de registrar el pago. La factura fiscal del Portal es diferente y sigue siendo posterior al pago.
 
-Queda una dependencia del recorrido real: Storeganise debe permitir cumplir los requisitos y preparar el registro interno antes del pago externo puntual. Esta etiqueta no confirma la reserva por el cliente ni habilita esas automatizaciones. No se anuncia el recorrido completo como operativo hasta validarlo.
+La API debe aceptar las operaciones de confirmación y ocupación con las credenciales configuradas. El servidor ejecuta los pasos conocidos; la etiqueta GTM mantiene su función de identificación y redirección. El recorrido desplegado debe verificarse con una prueba manual.
 
 Después de un cobro confirmado, el proceso existente **servidor Pay → Storeganise** registra el pago en la factura del cliente correcto, con método `card`. El script no activa cuentas. Pay solo muestra la bodega activa cuando Storeganise confirma su ocupación por ese cliente. Storeganise mantiene su conexión con el Portal fiscal; no se añadió comunicación directa Pay → Portal.
 

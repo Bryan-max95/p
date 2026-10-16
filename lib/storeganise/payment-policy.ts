@@ -16,10 +16,14 @@ export function isLiveStoreganiseSandbox(session: PaymentBinding): boolean {
   return session.environment === 'sandbox' && instance(session.storeganise_context?.apiOrigin) === 'com';
 }
 
-/** Derive this from the persisted payment, never from today's environment flag.
- * A later switch to production must not deliver an old sandbox payment to .com. */
+export function hasSandboxActivation(session: PaymentBinding): boolean {
+  return isLiveStoreganiseSandbox(session) && session.storeganise_context?.sandboxActivation === 'live-storeganise-v1';
+}
+
+/** Permission is saved with the checkout. Changing environment flags never
+ * promotes an old sandbox receipt into a live Storeganise payment. */
 export function storeganisePaymentWritesAllowed(session: PaymentBinding): boolean {
   const target = instance(session.storeganise_context?.apiOrigin);
   return (session.environment === 'production' && target === 'com') ||
-    (session.environment === 'sandbox' && target === 'dev');
+    (session.environment === 'sandbox' && target === 'dev') || hasSandboxActivation(session);
 }

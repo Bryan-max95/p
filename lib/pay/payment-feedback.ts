@@ -9,6 +9,7 @@ export function paymentFailureCode(reason: string | null | undefined, status: st
   if (['HTTP_401', 'HTTP_403', 'HTTP_404', 'AUTHENTICATION_SETUP_FAILED'].includes(status ?? '') ||
     ['AUTHENTICATION_FAILED', 'SETUP_UNAVAILABLE'].includes(reason ?? '')) return 'SETUP_UNAVAILABLE';
   if (['EXPIRED_CARD', 'CARD_EXPIRED'].includes(reason ?? '')) return 'CARD_EXPIRED';
+  if (reason === 'INSUFFICIENT_FUND') return 'INSUFFICIENT_FUNDS';
   if (['INVALID_DATA', 'MISSING_FIELD'].includes(reason ?? '')) return 'PAYMENT_REQUEST_INVALID';
   if (['INVALID_ACCOUNT', 'INVALID_PAYMENT_DATA', 'CARD_DETAILS_INVALID'].includes(reason ?? '')) return 'CARD_DETAILS_INVALID';
   if (['CONSUMER_AUTHENTICATION_FAILED', 'AUTHENTICATION_NOT_CONFIRMED'].includes(reason ?? '') ||
@@ -34,6 +35,7 @@ export function paymentFailureMessage(reason: string | undefined, status: string
   }
   if (reason === 'PAYMENT_REQUEST_INVALID') return say(language, 'No se pudo procesar la solicitud de pago por un dato enviado al servicio de pagos. Contacte a Roatan Self Storage.', 'The payment request could not be processed because of data sent to the payment service. Contact Roatan Self Storage.');
   if (reason === 'PAYMENT_NOT_CONFIRMED') return say(language, 'No se confirmó el pago. Consulte el estado de esta operación antes de intentar nuevamente.', 'Payment has not been confirmed. Check this transaction before trying again.');
+  if (['INSUFFICIENT_FUND', 'INSUFFICIENT_FUNDS'].includes(reason ?? '')) return say(language, 'El banco rechazó el pago por fondos insuficientes. Utilice otra tarjeta o consulte con su banco.', 'The bank declined the payment due to insufficient funds. Use another card or contact your bank.');
   if (['HTTP_401', 'HTTP_403', 'HTTP_404', 'AUTHENTICATION_SETUP_FAILED'].includes(status ?? '') ||
     ['AUTHENTICATION_FAILED', 'SETUP_UNAVAILABLE'].includes(reason ?? '')) {
     return say(language, 'El servicio de pago no está disponible. Contacte a Roatan Self Storage para continuar.', 'The payment service is unavailable. Contact Roatan Self Storage to continue.');

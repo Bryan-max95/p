@@ -2,9 +2,10 @@ import crypto from 'node:crypto';
 import { query, transaction } from '../pay/db';
 import type { SessionRow } from '../pay/types';
 import { assertStoreganiseEnabled, StoreganiseIntegrationError } from './config';
-import { assertOrderActive, getInvoice, getJob, getUnit, invoiceContext } from './records';
+import { getInvoice, invoiceContext } from './records';
 import { storeganiseRequest, StoreganiseApiError } from './client';
 import { storeganisePaymentWritesAllowed } from './payment-policy';
+import { bindPaidReservation, completePaidMoveIn } from './paid-booking';
 
 interface Delivery {
   session_id: string; transaction_id: string; attempt_count: number;
@@ -43,12 +44,20 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
     const stored = await query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1', [sessionId]);
     const session = stored.rows[0];
     // Also stops legacy/queued sandbox deliveries after configuration changes.
-    // This check precedes every Storeganise call and cannot be enabled by a flag.
+    // This checks the permission saved with this payment, including explicit
+    // sandbox activation. Today's flag cannot upgrade old sandbox receipts.
     if (!storeganisePaymentWritesAllowed(session)) {
       await saveProgress(delivery, 'sandbox_only');
       return;
     }
     const { url, environment } = assertStoreganiseEnabled();
+    if (session.storeganise_context?.apiOrigin !== url.origin || session.environment !== environment ||
+      session.storeganise_context.customerId !== session.customer_id || !session.reference_usd_amount || !session.paid_at) {
+      throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
+    }
+    if (!await bindPaidReservation(session)) {
+      await saveProgress(delivery, 'awaiting_reservation', 'STOREGANISE_RESERVATION_PENDING'); return;
+    }
     const binding = session.storeganise_context;
     if (!binding || !binding.invoiceId || !binding.rentalId || binding.kind === 'reservation' || binding.apiOrigin !== url.origin || session.environment !== environment ||
       binding.customerId !== session.customer_id || binding.invoiceId !== session.invoice_id ||
@@ -56,7 +65,9 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
       throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
     }
     const context = await invoiceContext(binding.invoiceId,binding.customerId,binding.jobId);
-    if (context.rental.id !== binding.rentalId || context.invoice.siteId !== binding.siteId || context.invoice.deleted) {
+    if (context.rental.id !== binding.rentalId || context.invoice.siteId !== binding.siteId || context.invoice.deleted ||
+      context.rental.endDate || ['ended','archived','cancelled','canceled'].includes(context.rental.state) ||
+      ['blocked','archived','unassigned'].includes(context.unit.state)) {
       throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
     }
     const amount = Number(session.reference_usd_amount).toFixed(2);
@@ -86,7 +97,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
         WHERE session_id=$1 AND lease_token=$2 AND payment_write_started=false RETURNING session_id`, [sessionId,lease]);
       if (!writing.rowCount) return;
       delivery.payment_write_started = true;
-      const notes = `${marker}\nReference: RSS-${session.id}\nUSD ${amount}; HNL ${Number(session.amount).toFixed(2)}; BCH ${session.usd_hnl_rate} (${session.fx_rate_date}).`;
+      const notes = `${marker}\n${session.environment === 'sandbox' ? 'SANDBOX: transaccion de prueba, sin ingreso bancario. Activacion solicitada por el operador.\n' : ''}Reference: RSS-${session.id}\nUSD ${amount}; HNL ${Number(session.amount).toFixed(2)}; BCH ${session.usd_hnl_rate} (${session.fx_rate_date}).`;
       // Same manual payment operation used by Storeganise's Management Portal.
       // "manual" means an externally collected payment; the displayed method is card.
       await storeganiseRequest(`/invoices/${binding.invoiceId}/payments`,'POST',{
@@ -99,28 +110,14 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
     if (invoice.state !== 'paid' || Math.abs(invoice.balance) > 0.00001) {
       await saveProgress(delivery,'review','STOREGANISE_BALANCE_NOT_SETTLED',payment.id); return;
     }
-    const job = context.job ? await getJob(context.job.id) : undefined;
-    if(job&&(job.ownerId!==binding.customerId||job.type!=='unit_moveIn'||
-      (job.result.unitRentalId&&job.result.unitRentalId!==binding.rentalId)))throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
-    if (job && ['cancelled','canceled','failed'].includes(job.state)) {
-      await saveProgress(delivery,'review','MOVE_IN_REQUIRES_REVIEW',payment.id); return;
-    }
-    if(job)assertOrderActive(job);
-    // Complete only the payment-dependent step of this exact paid initial invoice.
-    // Never skip agreement/identity checks or directly force a unit to "occupied".
-    const invoiceStep = job?.steps.find(step => step.type === 'invoice_createInitial' &&
-      step.state === 'ready' && step.result?.invoiceId === invoice.id);
-    if (job && invoiceStep && process.env.STOREGANISE_COMPLETE_PAID_INVOICE_STEP === 'true') {
-      await storeganiseRequest(`/jobs/${job.id}/steps/${encodeURIComponent(invoiceStep.id)}`,'PUT',{state:'completed'});
-    }
-    const unit = await getUnit(binding.unitId);
-    const active = unit.state === 'occupied' && unit.ownerId === binding.customerId && unit.rentalId === binding.rentalId;
+    const active = await completePaidMoveIn(session);
     await saveProgress(delivery,active?'active':'awaiting_move_in',undefined,payment.id);
   } catch (error) {
     const code = error instanceof StoreganiseIntegrationError ? error.code : error instanceof StoreganiseApiError ?
       `STOREGANISE_${error.code}${error.status ? `_${error.status}` : ''}` : 'STOREGANISE_SYNC_UNAVAILABLE';
     const review = error instanceof StoreganiseIntegrationError || delivery.payment_write_started ||
       (error instanceof StoreganiseApiError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 429);
+    console.error('[PAY_STOREGANISE_SYNC]', { sessionId, code, status: review ? 'review' : 'retry' });
     await saveProgress(delivery,review?'review':'retry',code);
   }
 }

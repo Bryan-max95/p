@@ -28,7 +28,7 @@ function fixture(t: TestContext, customer = owner) {
     CYBERSOURCE_ENVIRONMENT: 'production', CYBERSOURCE_MERCHANT_ID: 'unit-test-merchant',
     CYBERSOURCE_KEY_ID: crypto.randomUUID(), CYBERSOURCE_SHARED_SECRET: Buffer.alloc(32, 8).toString('base64'),
     STOREGANISE_PAY_ENABLED: 'true', STOREGANISE_BRIDGE_ENABLED: 'true', STOREGANISE_API_URL: origin + '/api/v1/admin',
-    STOREGANISE_LIVE_SANDBOX_ENABLED: 'false', STOREGANISE_TEST_CUSTOMER_IDS: owner,
+    STOREGANISE_LIVE_SANDBOX_ENABLED: 'false', STOREGANISE_SANDBOX_ACTIVATION_ENABLED: 'false', STOREGANISE_TEST_CUSTOMER_IDS: owner,
     STOREGANISE_API_KEY: 'unit-test-private-key', PAY_SESSION_TOKEN_SECRET: secret,
     PAY_PUBLIC_URL: 'https://www.payroatanselfstorage.com' };
   const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
@@ -329,6 +329,24 @@ test('successful live sandbox tests can be repeated without deleting history or 
   assert.equal(f.requests.some(r => /payments|steps|submit/.test(r.path)), false);
   process.env.CYBERSOURCE_ENVIRONMENT = 'production';
   await assert.rejects(repeatSandboxPayment(session, 'sandbox-2'), /REPEAT_DISABLED/);
+});
+
+test('activation permission is saved only on new authenticated checkouts and survives later flag changes', async t => {
+  const f = fixture(t);
+  process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
+  process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
+  process.env.STOREGANISE_SANDBOX_ACTIVATION_ENABLED = 'true';
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  await redeemProfileBridge(f.deliveredInput(), booking);
+  const session = [...f.sessions.values()][0];
+  assert.equal(session.storeganise_context?.sandboxActivation, 'live-storeganise-v1');
+  assert.equal(publicSession(session).storeganise?.sandboxActivation, true);
+  assert.equal(publicSession(session).storeganise?.status, 'waiting_payment');
+  await verifyStoreganiseCheckout(session);
+  assert.equal(f.requests.some(r => /payments|steps|submit/.test(r.path)), false, 'No activation before bank confirmation');
+  process.env.STOREGANISE_SANDBOX_ACTIVATION_ENABLED = 'false';
+  assert.equal(publicSession(session).storeganise?.sandboxActivation, true);
+  await assert.rejects(repeatSandboxPayment(session, 'old-result'), /REPEAT_DISABLED/);
 });
 
 test('sandbox can verify an existing live invoice but still reports a test-only session', async t => {

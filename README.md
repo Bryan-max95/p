@@ -2,7 +2,7 @@
 
 Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Muestra el saldo en USD, calcula el cargo en HNL con la tasa BCH y guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
 
-Actualización del código: 15 de octubre de 2026. Pay admite temporalmente datos de Storeganise real con CyberSource sandbox mediante `STOREGANISE_LIVE_SANDBOX_ENABLED=true`, para todos los clientes autenticados sin una lista de IDs. Conserva la identificación y el total, permite escribir la tarjeta en Microform y repetir una prueba aprobada conservando su historial. Muestra el resultado como prueba, sin registrar pagos reales ni activar bodegas. Ver [configuración de Vercel](CONEXION_GTM_STOREGANISE.md#3-vercel-y-base-de-datos).
+Actualización del código: 16 de octubre de 2026. Con `STOREGANISE_LIVE_SANDBOX_ENABLED=true` se conserva Storeganise real y CyberSource sandbox para todos los clientes autenticados. La nueva opción `STOREGANISE_SANDBOX_ACTIVATION_ENABLED=true` permite registrar el pago de prueba y completar la ocupación real después de la aprobación. El permiso se guarda solo en checkouts nuevos; las pruebas anteriores no se aplican automáticamente. Ver [activación y variables de Vercel](ACTIVACION_STOREGANISE.md).
 
 Se verificó el cambio con comprobaciones locales de TypeScript, ESLint y servicios simulados. No se iniciaron el servidor ni transacciones bancarias, ni se modificaron las cuentas externas. Las credenciales y el despliegue deben verificarse con la prueba manual del operador.
 
@@ -17,7 +17,7 @@ Flujo de pagos reales, cuando CyberSource está en producción:
 5. Pay puede completar el paso pendiente de la factura inicial ya pagada. Solo muestra la bodega habilitada después de comprobar que está ocupada por ese cliente y ese alquiler.
 6. Storeganise notifica al portal fiscal mediante la conexión que administra el comercio. Pay no envía avisos directos al portal.
 
-El enlace firmado permite abrir el carrusel sin volver a pedir la contraseña. Para reservas sin factura interna, el servidor consulta la vista previa del importe en Storeganise. Antes de cobrar, la reserva debe estar confirmada y disponer de un registro contable cobrable; Pay no omite firmas ni fuerza la ocupación. Seleccionar webhooks no instala la integración de facturación que entrega el enlace al navegador. La activación de esa integración y sus automatizaciones siguen pendientes de confirmar en la cuenta externa; ver [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md). No se almacenan tarjetas para cargos recurrentes.
+El enlace firmado permite abrir el carrusel sin volver a pedir la contraseña. Para reservas sin factura interna, el servidor consulta la vista previa del importe en Storeganise. En producción bancaria se conserva la exigencia de registro interno confirmado antes del cobro. Con sandbox y activación explícita, después de aprobar se confirma la reserva y se vincula su factura interna antes de registrar el pago. Pay completa los pasos conocidos de pago y ocupación y verifica la asignación; no inventa firmas ni omite pasos desconocidos. No se almacenan tarjetas para cargos recurrentes.
 
 ## Publicación
 

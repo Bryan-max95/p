@@ -44,7 +44,7 @@ export interface PaymentSession {
   billingRequired?: boolean;
   billingDetails?: BillTo;
   requiresReservationConfirmation?: boolean;
-  storeganise?: { status: string; paymentId?: string; returnUrl: string };
+  storeganise?: { status: string; paymentId?: string; returnUrl: string; sandboxActivation?: boolean };
 }
 
 export interface BankAuthentication {

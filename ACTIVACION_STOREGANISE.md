@@ -47,6 +47,15 @@ El contrato de actualización de pasos se contrastó con el cliente administrati
 
 ## Efectos y validación
 
+Si el carrusel no abre y aparece `V8 / STOREGANISE_BRIDGE_UNAVAILABLE`, todavía no se ha llegado al pago bancario. El endpoint `/api/storeganise/bridge` registra ahora `[PAY_STOREGANISE_BRIDGE]` con `stage`, `code` y `diagnosticId`. La misma referencia aparece en la respuesta JSON y en `X-Pay-Diagnostic-Id`; no hace falta cambiar el script V8 existente.
+
+- `BCH_*`: no se pudo obtener una tasa válida o hay un problema con su configuración.
+- `PAY_DATABASE_UNAVAILABLE`: revisar el código técnico `dependencyCode` del registro de Vercel.
+- `STOREGANISE_API_*`: revisar la conexión, configuración o respuesta de Storeganise según el código.
+- `ORDER_NOT_ACTIVE`: Storeganise considera la reserva abandonada, cancelada, vencida o fallida. Iniciar una nueva reserva; cambiar variables o recargar Pay no reactiva la anterior.
+
+Pay acepta `result.unitId: null` cuando la reserva activa aún tiene una selección por tipo de unidad. Sigue comprobando propietario, estado y total; no permite cobrar una reserva abandonada ni considera asignada una bodega sin confirmación de Storeganise.
+
 CyberSource sandbox no ingresa dinero en el banco. Este modo sí registra un pago y puede ocupar una bodega real; los eventos reales de Storeganise pueden activar el portal fiscal existente. Pay no envía facturas directamente al Portal. Las notas y la pantalla conservan la condición de prueba bancaria.
 
 Las comprobaciones locales usan PostgreSQL y APIs simuladas: aprobación, rechazo/resultado incierto, reserva correcta, propietario ajeno, importe cambiado, sesiones históricas, entrega concurrente, respuesta perdida, pago único y lectura final de ocupación. No se inicia el proyecto ni se usa la cuenta externa para probar. La validación integral desplegada permanece a cargo de la prueba manual del operador.

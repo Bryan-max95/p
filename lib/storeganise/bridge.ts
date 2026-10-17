@@ -110,7 +110,9 @@ export async function redeemProfileBridge(input: Extract<z.infer<typeof bridgeIn
     // this grant after its first claim. Every returned launch token is single-use.
     return { url: result.url };
   } catch (error) {
-    await query('UPDATE pay_storeganise_bridge_grants SET lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2', [grant.id, lease]);
+    // Preserve the checkout failure if the database also fails during cleanup.
+    // An unreleased lease expires after 90 seconds; do not hide the root cause.
+    await query('UPDATE pay_storeganise_bridge_grants SET lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2', [grant.id, lease]).catch(() => undefined);
     throw error;
   }
 }

@@ -8,6 +8,8 @@ import { prepareProfileBridge, redeemProfileBridge } from '../lib/storeganise/br
 import { prepareReservationForPayment } from '../lib/storeganise/reservation';
 import { verifyStoreganiseCheckout } from '../lib/storeganise/checkout';
 import { publicSession } from '../lib/pay/service';
+import { ExchangeRateError } from '../lib/pay/bch';
+import { describeBridgeFailure } from '../lib/storeganise/bridge-diagnostics';
 import { repeatSandboxPayment } from '../lib/pay/repeat-sandbox';
 import { OPTIONS, POST } from '../app/api/storeganise/bridge/route';
 import type { SessionRow } from '../lib/pay/types';
@@ -39,7 +41,8 @@ function fixture(t: TestContext, customer = owner) {
   const audit: Array<{ subjectId: string; receipt: Record<string, unknown> }> = [];
   const requests: Array<{ path: string; method: string }> = [];
   const state = { owner: customer, invoice: false, total: 199, disabled: false, orderState: 'notSubmitted', field: { ...field },
-    customFields: { unrelated: 'preserve me' } as Record<string, unknown>, providerStatus: 200, attempts: 0, releaseCalls: 0 };
+    customFields: { unrelated: 'preserve me' } as Record<string, unknown>, providerStatus: 200, attempts: 0, releaseCalls: 0,
+    nullUnitId: false, rateError: undefined as Error | undefined, failLeaseCleanup: false };
   const runQuery = async (sql: string, values: unknown[] = []) => {
     let rows: unknown[] = [];
     if (sql.startsWith('INSERT INTO pay_customer_login_limits')) rows = [{ attempts: ++state.attempts }];
@@ -59,9 +62,11 @@ function fixture(t: TestContext, customer = owner) {
       const g = grants.get(String(values[0]))!;
       if (g.lease_token === values[2]) { g.session_id = String(values[1]); g.lease_token = null; g.lease_until = null; rows = [g]; }
     } else if (sql.startsWith('UPDATE pay_storeganise_bridge_grants SET lease_token=')) {
+      if (state.failLeaseCleanup) throw Object.assign(new Error('private cleanup data'), { code: 'ECONNRESET' });
       const g = grants.get(String(values[0]))!;
       if (g.lease_token === values[1]) { g.lease_token = null; g.lease_until = null; }
     } else if (sql.startsWith('SELECT rate FROM pay_exchange_rates')) {
+      if (state.rateError) throw state.rateError;
       rows = [{ rate: { source: 'BCH', indicatorId: 97, hnlPerUsd: '26.500000',
         rateDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Tegucigalpa' }).format(new Date()), fetchedAt: new Date().toISOString() } }];
     } else if (sql.startsWith('SELECT * FROM pay_sessions WHERE event_id=')) rows = [...sessions.values()].filter(s => s.event_id === values[0]);
@@ -104,6 +109,7 @@ function fixture(t: TestContext, customer = owner) {
     let body: unknown;
     if (path === `/jobs/${orderId}` && method === 'GET') body = { id: orderId, ownerId: state.owner, type: 'unit_moveIn', state: 'ready', steps: [],
       result: { siteId, unitTypeId: typeId, startDate: '2026-10-30', orderState: state.orderState,
+        ...(state.nullUnitId ? { unitId: null } : {}),
         ...(state.invoice ? { invoiceId, unitRentalId: rentalId, unitId } : {}) } };
     else if (path === `/jobs/${orderId}/operations/previewInvoice` && method === 'POST') body = { total: state.total };
     else if (path === `/users/${customer}` && method === 'GET') body = { id: customer, firstName: 'Test', lastName: 'Customer', email: 'customer@example.test', isDisabled: state.disabled, customFields: state.customFields };
@@ -202,6 +208,105 @@ test('private profile proof opens the correct draft carousel without invoice or 
   await assert.rejects(redeemProfileBridge({ ...input, clientNonce: nonce() }, booking), /ACCESS_USED/);
   const retry = await redeemProfileBridge(input, booking);
   assert.notEqual(retry.url, result.url); assert.equal(f.sessions.size, 1, 'Same browser reuses the reservation, not a second payment');
+});
+
+test('an active reservation with a null unit assignment opens the authenticated carousel', async t => {
+  const f = fixture(t);
+  f.state.nullUnitId = true;
+  process.env.CYBERSOURCE_ENVIRONMENT = 'sandbox';
+  process.env.STOREGANISE_LIVE_SANDBOX_ENABLED = 'true';
+  process.env.STOREGANISE_SANDBOX_ACTIVATION_ENABLED = 'true';
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  const result = await redeemProfileBridge(f.deliveredInput(), booking);
+  assert.match(result.url, /^https:\/\/www\.payroatanselfstorage\.com\/\?session=/);
+  const session = [...f.sessions.values()][0];
+  assert.equal(session.customer_id, owner);
+  assert.equal(session.unit_id, typeId, 'Retain the selected unit type until Storeganise assigns a unit');
+  assert.equal(session.storeganise_context?.selectedUnitId, undefined);
+  assert.equal(session.storeganise_context?.sandboxActivation, 'live-storeganise-v1');
+  assert.equal(session.reference_usd_amount, '199.00');
+  await verifyStoreganiseCheckout(session);
+  f.state.owner = other;
+  await assert.rejects(verifyStoreganiseCheckout(session), /IDENTITY_MISMATCH/);
+});
+
+test('an abandoned reservation with null unit assignment reports its state and never opens checkout', async t => {
+  const f = fixture(t);
+  f.state.nullUnitId = true;
+  f.state.orderState = 'abandoned';
+  const logs: unknown[] = [];
+  t.mock.method(console, 'error', (...args: unknown[]) => { logs.push(args); });
+  const response = await POST(new NextRequest('https://www.payroatanselfstorage.com/api/storeganise/bridge', {
+    method: 'POST', headers: { origin: booking, 'content-type': 'application/json' },
+    body: JSON.stringify({ operation: 'prepare', userId: owner, orderId }),
+  }));
+  const body = await response.json();
+  assert.equal(response.status, 409);
+  assert.equal(body.error, 'ORDER_NOT_ACTIVE');
+  assert.equal(body.code, 'ORDER_NOT_ACTIVE');
+  assert.equal(response.headers.get('X-Pay-Diagnostic-Id'), body.diagnosticId);
+  assert.equal(f.grants.size, 0);
+  assert.equal(f.sessions.size, 0);
+  assert.equal(f.deliveries.length, 0);
+  assert.equal(JSON.stringify(logs).includes(owner), false);
+});
+
+test('bridge diagnoses rate and database failures safely and a recovered redemption can open checkout', async t => {
+  const f = fixture(t);
+  const logs: unknown[] = [];
+  t.mock.method(console, 'error', (...args: unknown[]) => { logs.push(args); });
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  const input = f.deliveredInput();
+  const send = () => POST(new NextRequest('https://www.payroatanselfstorage.com/api/storeganise/bridge', {
+    method: 'POST', headers: { origin: booking, 'content-type': 'application/json' }, body: JSON.stringify(input),
+  }));
+  for (const [error, expected] of [
+    [new ExchangeRateError('BCH_UNAVAILABLE'), 'BCH_UNAVAILABLE'],
+    [Object.assign(new Error('private database URL and customer data'), { code: '42501' }), 'PAY_DATABASE_UNAVAILABLE'],
+  ] as const) {
+    f.state.rateError = error;
+    const response = await send();
+    const body = await response.json();
+    assert.equal(response.status, 503);
+    assert.equal(body.error, 'STOREGANISE_BRIDGE_UNAVAILABLE', 'Existing GTM V8 stays compatible');
+    assert.equal(body.code, expected);
+    assert.match(body.diagnosticId, /^[0-9a-f-]{36}$/);
+    assert.equal(response.headers.get('X-Pay-Diagnostic-Id'), body.diagnosticId);
+    assert.match(response.headers.get('Access-Control-Expose-Headers')!, /X-Pay-Diagnostic-Id/);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), booking);
+    assert.equal(f.sessions.size, 0);
+    assert.equal([...f.grants.values()][0].lease_token, null);
+  }
+  assert.equal(JSON.stringify(logs).includes('private database'), false);
+  assert.equal(JSON.stringify(logs).includes(input.token), false);
+  assert.equal(JSON.stringify(logs).includes(owner), false);
+  assert.match(JSON.stringify(logs), /42501/);
+  f.state.rateError = undefined;
+  const recovered = await send();
+  assert.equal(recovered.status, 200);
+  assert.match((await recovered.json()).url, /^https:\/\/www\.payroatanselfstorage\.com\/\?session=/);
+  assert.equal(f.sessions.size, 1);
+  assert.equal(f.requests.some(r => /payments|steps|submit/.test(r.path)), false);
+});
+
+test('a cleanup failure does not replace the original redemption error', async t => {
+  const f = fixture(t);
+  await prepareProfileBridge({ operation: 'prepare', userId: owner, orderId });
+  f.state.rateError = new ExchangeRateError('BCH_UNAUTHORIZED');
+  f.state.failLeaseCleanup = true;
+  await assert.rejects(redeemProfileBridge(f.deliveredInput(), booking), /BCH_UNAUTHORIZED/);
+  assert.equal(f.sessions.size, 0);
+});
+
+test('bridge diagnostics distinguish invalid input from upstream records without exposing exception text', () => {
+  const invalid = bridgeInput.safeParse({ token: 'private-data' });
+  assert.equal(invalid.success, false);
+  if (invalid.success) return;
+  assert.deepEqual(describeBridgeFailure(invalid.error, 'request'), { code: 'INVALID_BRIDGE_REQUEST', status: 400 });
+  assert.deepEqual(describeBridgeFailure(invalid.error, 'prepare'), { code: 'INVALID_STOREGANISE_DATA', status: 503 });
+  assert.deepEqual(describeBridgeFailure(new Error('private credentials'), 'redeem'), {
+    code: 'STOREGANISE_BRIDGE_INTERNAL_ERROR', status: 503,
+  });
 });
 
 test('confirmed invoice uses exact ledger owner, unit and balance', async t => {

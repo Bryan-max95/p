@@ -19,7 +19,9 @@ export const unitSchema = z.object({ id, siteId: id, name: z.string(), state: z.
   ownerId: id.nullable().optional(), rentalId: id.nullable().optional(),
 }).passthrough();
 export const jobSchema = z.object({ id, ownerId: id, type: z.string(), state: z.string(),
-  result: z.object({ invoiceId: id.optional(), unitRentalId: id.optional(), unitId: id.optional(), siteId: id.optional(), orderState:z.string().optional() }).passthrough(),
+  // Storeganise can send null before assigning a unit, and after releasing an
+  // abandoned reservation. Treat it as absent, then check the order state.
+  result: z.object({ invoiceId: id.optional(), unitRentalId: id.optional(), unitId: id.nullish().transform(value => value ?? undefined), siteId: id.optional(), orderState:z.string().optional() }).passthrough(),
   steps: z.array(z.object({ id: z.string().min(1).max(100), type: z.string(), state: z.string(),
     result: z.object({ invoiceId: id.optional() }).passthrough().optional(), requiresInput: z.boolean().optional(),
   }).passthrough()),

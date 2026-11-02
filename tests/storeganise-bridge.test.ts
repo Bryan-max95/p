@@ -5,8 +5,8 @@ import { NextRequest } from 'next/server';
 import { database, closeDatabase } from '../lib/pay/db';
 import { bridgeInput, bridgeToken, bridgeHash, assertBridgeField, assertBridgeProof, BRIDGE_FIELD, type BridgeGrant } from '../lib/storeganise/bridge-protocol';
 import { prepareProfileBridge, redeemProfileBridge } from '../lib/storeganise/bridge';
-import { prepareReservationForPayment } from '../lib/storeganise/reservation';
-import { verifyStoreganiseCheckout } from '../lib/storeganise/checkout';
+import { prepareReservationForPayment, openSignedReservationCheckout } from '../lib/storeganise/reservation';
+import { openStoreganiseCheckout, verifyStoreganiseCheckout } from '../lib/storeganise/checkout';
 import { publicSession } from '../lib/pay/service';
 import { ExchangeRateError } from '../lib/pay/bch';
 import { describeBridgeFailure } from '../lib/storeganise/bridge-diagnostics';
@@ -92,6 +92,13 @@ function fixture(t: TestContext, customer = owner) {
         storeganise_context: JSON.parse(String(values[23])), storeganise_status: values[24], portal_status: values[15], status: 'open', created_at: new Date(), expires_at: new Date(Date.now() + 1800000),
       } as SessionRow;
       sessions.set(s.id, s); rows = [s];
+    } else if (sql.startsWith('UPDATE pay_sessions SET reference_usd_amount=')) {
+      const s = sessions.get(String(values[0]))!;
+      Object.assign(s, { reference_usd_amount: values[1], amount: values[2], currency: sql.includes("currency='USD'") ? 'USD' : s.currency,
+        usd_hnl_rate: values[3], fx_rate_date: values[4], fx_fetched_at: new Date(String(values[5])),
+        expires_at: new Date(Date.now() + 1800000), capture_context: undefined });
+      if (values.length > 6) Object.assign(s, { unit_id: values[6], unit_name: values[7], storeganise_context: JSON.parse(String(values[8])) });
+      rows = [s];
     } else if (sql.startsWith('UPDATE pay_sessions SET return_url=')) sessions.get(String(values[0]))!.return_url = String(values[1]);
     else if (sql.startsWith('INSERT INTO pay_launch_links') || sql.startsWith('DELETE FROM pay_launch_links')) { /* no bank action */ }
     else if (!['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql) && !sql.includes('pg_advisory_xact_lock') && !sql.includes('CREATE TABLE IF NOT EXISTS')) throw new Error(`Unhandled query: ${sql}`);
@@ -198,7 +205,8 @@ test('private profile proof opens the correct draft carousel without invoice or 
   assert.equal(f.sessions.size, 1);
   const session = [...f.sessions.values()][0];
   assert.equal(session.customer_id, owner); assert.equal(session.order_id, orderId);
-  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '5273.50');
+  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '199.00');
+  assert.equal(session.currency, 'USD');
   assert.equal(session.unit_id, typeId); assert.equal(session.invoice_id, null);
   assert.equal(session.storeganise_context?.reservationAuthentication, 'profile-bridge');
   assert.equal(publicSession(session).requiresReservationConfirmation, false);
@@ -315,8 +323,35 @@ test('confirmed invoice uses exact ledger owner, unit and balance', async t => {
   await redeemProfileBridge(f.deliveredInput(), booking);
   const session = [...f.sessions.values()][0];
   assert.equal(session.customer_id, owner); assert.equal(session.unit_id, unitId); assert.equal(session.invoice_id, invoiceId);
-  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '5273.50');
+  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '199.00');
+  assert.equal(session.currency, 'USD');
   assert.equal(f.requests.some(r => r.path.includes('previewInvoice')), false);
+});
+
+test('renewed unpaid Storeganise checkouts move to USD while pending and paid operations retain their currency', async t => {
+  for (const invoice of [false, true]) await t.test(invoice ? 'invoice' : 'reservation', async st => {
+    const f = fixture(st); f.state.invoice = invoice;
+    const open = () => invoice
+      ? openStoreganiseCheckout({ userId: owner, orderId, returnUrl: booking + '/account/units' })
+      : openSignedReservationCheckout({ userId: owner, orderId, returnUrl: booking + '/account/units' });
+    const created = await open();
+    const row = f.sessions.get(created.sessionId)!;
+    for (const status of ['pending', 'processing', 'unknown', 'succeeded', 'open', 'declined']) {
+      Object.assign(row, { status, currency: 'HNL', amount: '5273.50', capture_context: 'old-context' });
+      const result = await open();
+      assert.equal(result.sessionId, created.sessionId);
+      const renewable = ['open', 'declined'].includes(status);
+      assert.equal(row.currency, renewable ? 'USD' : 'HNL');
+      assert.equal(row.amount, renewable ? '199.00' : '5273.50');
+      assert.equal(row.capture_context, renewable ? undefined : 'old-context');
+      assert.equal(row.reference_usd_amount, '199.00');
+    }
+    Object.assign(row, { status: 'declined', currency: 'HNL', amount: '5273.50', gateway_status: 'HTTP_400', gateway_transaction_id: 'uncertain' });
+    await open();
+    assert.equal(row.currency, 'HNL'); assert.equal(row.amount, '5273.50');
+    assert.equal(f.sessions.size, 1);
+    assert.equal(f.requests.some(r => /payments|steps|submit|cybersource/.test(r.path)), false);
+  });
 });
 
 test('ownership is rechecked on redemption and foreign returns are refused', async t => {

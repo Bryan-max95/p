@@ -8,7 +8,7 @@ import { storeganiseGet, storeganiseRequest } from './client';
 import { openStoreganiseCheckout, resolveCheckout } from './checkout';
 import { query, transaction } from '../pay/db';
 import { createCheckoutSession, requiredUrl } from '../pay/service';
-import { currentBchRate, hnlCharge } from '../pay/exchange-rate';
+import { currentBchRate } from '../pay/exchange-rate';
 import { billToSchema } from '../pay/billing-details';
 import { needsLegacyPaymentReview } from '../pay/payment-state';
 import type { SessionRow, StoreganiseContext } from '../pay/types';
@@ -141,12 +141,12 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
       }
       if (existingBinding.kind === 'reservation' && ['open', 'declined'].includes(session.status) && !needsLegacyPaymentReview(session)) {
         // Never change a quote that is already authenticating/processing or paid.
-        if (session.expires_at.getTime() <= Date.now() || Number(session.reference_usd_amount).toFixed(2) !== amount ||
+        if (session.expires_at.getTime() <= Date.now() || Number(session.reference_usd_amount).toFixed(2) !== amount || session.currency !== 'USD' ||
           session.unit_id !== selectionId || existingBinding.unitTypeId !== order.unitTypeId) {
-          const renewed = await client.query<SessionRow>(`UPDATE pay_sessions SET reference_usd_amount=$2,amount=$3,
+          const renewed = await client.query<SessionRow>(`UPDATE pay_sessions SET reference_usd_amount=$2,amount=$3,currency='USD',
             usd_hnl_rate=$4,fx_rate_date=$5,fx_fetched_at=$6,expires_at=now()+interval '30 minutes',
             capture_context=NULL,unit_id=$7,unit_name=$8,storeganise_context=$9,updated_at=now() WHERE id=$1 RETURNING *`,
-          [session.id, amount, hnlCharge(amount, rate.hnlPerUsd), rate.hnlPerUsd, rate.rateDate, rate.fetchedAt,
+          [session.id, amount, amount, rate.hnlPerUsd, rate.rateDate, rate.fetchedAt,
             selectionId, unitName, JSON.stringify(binding)]);
           session = renewed.rows[0];
         }

@@ -1,0 +1,19 @@
+interface Quote { hnlAmount?: string; hnlPerUsd: string }
+
+export function chargeLabel(amount: string, currency: string) {
+  return `${currency === 'USD' ? '$ ' : currency === 'HNL' ? 'L ' : ''}${amount} ${currency}`;
+}
+
+export function chargeDisclosure(amount: string, currency: string, quote: Quote | undefined,
+  language: 'es' | 'en', paid = false, simulated = false) {
+  const label = chargeLabel(amount, currency);
+  const main = language === 'es'
+    ? `${simulated ? 'Importe de prueba:' : paid ? 'Cobro realizado:' : 'Se cobrará en su tarjeta:'} ${label}.`
+    : `${simulated ? 'Test amount:' : paid ? 'Amount charged:' : 'Your card will be charged:'} ${label}.`;
+  const equivalent = currency === 'USD' && quote?.hnlAmount
+    ? (language === 'es' ? ` Equivalente informativo: L ${quote.hnlAmount} HNL.` : ` Reference equivalent: L ${quote.hnlAmount} HNL.`) : '';
+  const rate = quote ? (language === 'es'
+    ? ` Tipo de cambio: L ${Number(quote.hnlPerUsd)} por USD 1.`
+    : ` Exchange rate: L ${Number(quote.hnlPerUsd)} per USD 1.`) : '';
+  return main + equivalent + rate;
+}

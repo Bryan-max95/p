@@ -27,6 +27,7 @@ import { SecureCardFields, type SecureCardHandle, type CardBrand } from './secur
 import { usePaymentSession } from '@/hooks/use-payment-session';
 import { paymentFailureMessage } from '@/lib/pay/payment-feedback';
 import { BillingDetailsFields, readBillingDetails } from './billing-details-fields';
+import { chargeLabel as formatChargeLabel, chargeDisclosure } from '@/lib/pay/amount-display';
 import { StoreganiseReturn } from './storeganise-return';
 import { BankAuthentication } from './bank-authentication';
 import { demoScenarioForAmount, DEMO_AMOUNTS, DEMO_SCENARIOS, demoCurrency, DEFAULT_DEMO_SCENARIO } from '@/lib/pay/demo-scenarios';
@@ -175,14 +176,14 @@ function CardBrandLogo({ brand, active = true }: { brand: Exclude<CardBrand, 'de
 }
 
 
-export default function PaymentCarousel({ manualSandboxEnabled = false }: { manualSandboxEnabled?: boolean }) {
+export default function PaymentCarousel({ manualEnabled = false }: { manualEnabled?: boolean }) {
   const [lang, setLang] = useState<'es' | 'en'>('es');
   const t = TRANSLATIONS[lang];
 
   // Carousel slide step: 1 = Unit Details, 2 = Card Details, 3 = Confirmation Receipt
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
-  const payment = usePaymentSession(manualSandboxEnabled);
+  const payment = usePaymentSession(manualEnabled);
   const liveSandbox = payment.session?.storeganise?.status === 'sandbox_only';
   const sandboxActivation = payment.session?.storeganise?.sandboxActivation === true;
   const simulatedPayment = payment.session?.environment === 'sandbox';
@@ -190,15 +191,13 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
   const manualEntry = !payment.session;
   const unitNumber = payment.session?.unitName ?? manual.unitName;
   const clientName = payment.session?.clientName ?? manual.clientName;
-  const manualComplete = Boolean(manual.unitName.trim() && manual.clientName.trim() && /^[0-9]+([.,][0-9]{1,2})?$/.test(manual.amount) && Number(manual.amount.replace(',', '.')) > 0);
+  const manualComplete = Boolean(manualEnabled && manual.clientName.trim() && /^[0-9]{1,8}([.,][0-9]{1,2})?$/.test(manual.amount) && Number(manual.amount.replace(',', '.')) > 0);
   const amount = payment.session?.amount ?? '0.00';
   const priceReference = payment.session?.priceReference;
-  const chargeLabel = payment.session?.currency === 'HNL' ? `L ${amount} HNL` : `${amount} ${payment.session?.currency ?? ''}`;
+  const chargeLabel = formatChargeLabel(amount, payment.session?.currency ?? 'USD');
   const referenceAmount = priceReference?.amount ?? (manualEntry ? manual.amount : payment.session?.currency === 'USD' ? amount : '');
-  const displayLabel = manualEntry ? (manual.amount ? `$ ${manual.amount} USD` : '— USD') : referenceAmount ? `$ ${referenceAmount} USD` : chargeLabel;
-  const exchangeNotice = priceReference ? (lang === 'es'
-    ? `${simulatedPayment ? 'Importe de prueba:' : 'Se debitarán'} ${chargeLabel}${simulatedPayment ? '. Sin cobro real.' : ' de su tarjeta.'} Tipo de cambio: L ${Number(priceReference.hnlPerUsd)} por USD 1.`
-    : `${simulatedPayment ? 'Test amount:' : 'Your card will be charged'} ${chargeLabel}.${simulatedPayment ? ' No real charge.' : ''} Exchange rate: L ${Number(priceReference.hnlPerUsd)} per USD 1.`) : '';
+  const displayLabel = manualEntry ? (manual.amount ? `$ ${manual.amount} USD` : '— USD') : chargeLabel;
+  const exchangeNotice = chargeDisclosure(amount, payment.session?.currency ?? 'USD', priceReference, lang, false, simulatedPayment);
   const rateSource = priceReference?.source === 'BCH' ? `${lang === 'es' ? 'Fuente: Banco Central de Honduras' : 'Source: Banco Central de Honduras'} · ${priceReference.rateDate}` : '';
 
   // Form State - Card Details (Step 2)
@@ -228,7 +227,8 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
   // Submit Step 1
   const continueToCard = async () => {
     if (isProcessing || (manualEntry && (payment.error || !manualComplete))) return;
-    if (manualEntry && manualSandboxEnabled) {
+    if (manualEntry) {
+      if (!manualEnabled) return;
       const [whole, fraction = ''] = manual.amount.replace(',', '.').split('.');
       const amount = `${whole.replace(/^0+(?=\d)/, '')}.${fraction.padEnd(2, '0')}`;
       if (!await payment.startManual({ clientName: manual.clientName.trim(), unitName: manual.unitName.trim(), amount })) return;
@@ -298,6 +298,11 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
             window.sessionStorage.removeItem('pay-session-id');
             window.location.assign(`/?demo=${payment.session?.unitName === 'DEMO-B' ? 'b' : 'a'}&scenario=${scenario}`);
           }}>{demoCurrency(scenario) === 'USD' ? '$' : 'L'} {DEMO_AMOUNTS[scenario]} {demoCurrency(scenario)}</button>)}
+        </div>}
+        {payment.session?.currency === 'HNL' && ['open', 'declined', 'expired'].includes(payment.session.status) && !payment.requiresReview && <div role="alert" className="mb-4 rounded-xl bg-amber-50 p-4 text-xs text-amber-900">
+          <p>{paymentFailureMessage('SESSION_CURRENCY_CHANGED', undefined, lang)}</p>
+          {payment.session.storeganise ? <a href={payment.session.storeganise.returnUrl} className="mt-2 inline-block font-bold underline">{lang === 'es' ? 'Volver a Storeganise' : 'Return to Storeganise'}</a>
+            : <button type="button" onClick={handleReset} className="mt-2 font-bold underline">{lang === 'es' ? 'Nuevo pago en USD' : 'New USD payment'}</button>}
         </div>}
         
         {/* Selector de idioma minimalista en la esquina superior derecha */}
@@ -570,10 +575,10 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h2 className="text-lg font-display font-extrabold text-slate-900">
-                      {t.step1Title}
+                      {manualEntry ? (lang === 'es' ? 'Pago manual en dólares' : 'Manual payment in USD') : t.step1Title}
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {t.step1Desc}
+                      {manualEntry ? (lang === 'es' ? 'Ingrese su nombre y el monto en USD. Antes de pagar podrá revisar el total y su equivalente en lempiras.' : 'Enter your name and the USD amount. Review the total and its lempira equivalent before paying.') : t.step1Desc}
                     </p>
                   </div>
                   
@@ -590,7 +595,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                     {/* Número de Bodega */}
                     <div className="space-y-1.5">
                       <label htmlFor="unit-number" className="text-[11px] font-bold uppercase tracking-wider text-slate-600 block">
-                        {t.labelUnitNumber}
+                        {manualEntry || payment.session?.source === 'manual' ? (lang === 'es' ? 'Referencia o bodega (opcional)' : 'Reference or unit (optional)') : t.labelUnitNumber}
                       </label>
                       <div className="relative">
                         <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
@@ -599,7 +604,7 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                         <input
                           type="text"
                           id="unit-number"
-                          required
+                          required={!manualEntry}
                           value={unitNumber}
                           readOnly={!manualEntry}
                           disabled={isProcessing || (manualEntry && payment.error)}
@@ -663,16 +668,21 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
                       </span>
                       <div className="flex min-h-12 items-center gap-3 rounded-xl border border-emerald-100 bg-emerald-50/70 px-3.5">
                         <Building className="h-4 w-4 shrink-0 text-[#1F5C4F]" />
-                        <span className="text-sm font-extrabold text-[#1F5C4F]">{payment.session?.concept ?? (lang === 'es' ? 'Mensualidad de bodega' : 'Storage rent')}</span>
+                        <span className="text-sm font-extrabold text-[#1F5C4F]">{payment.session?.concept ?? (lang === 'es' ? 'Pago manual' : 'Manual payment')}</span>
                       </div>
                     </div>
 
                   </div>
 
+                  {manualEntry && <p className="text-xs text-slate-600">{manualEnabled
+                    ? (lang === 'es' ? 'El cobro se enviará en dólares (USD). Los lempiras se muestran como referencia.' : 'The charge will be sent in US dollars (USD). Lempiras are shown for reference.')
+                    : (lang === 'es' ? 'El pago manual no está disponible. Abra su pago desde Storeganise.' : 'Manual payment is unavailable. Open your payment from Storeganise.')}</p>}
                   {payment.preparingManual && <p role="status" className="text-xs text-slate-600">{lang === 'es' ? 'Preparando los campos de tarjeta…' : 'Preparing the card fields…'}</p>}
                   {payment.manualError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{payment.manualError === 'EXCHANGE_RATE_UNAVAILABLE'
                     ? (lang === 'es' ? 'No se pudo obtener el tipo de cambio del BCH. Intente nuevamente; no se ha realizado ningún cobro.' : 'The BCH exchange rate is unavailable. Try again; no payment has been made.')
-                    : (lang === 'es' ? 'No se pudieron abrir los campos de tarjeta. Vuelve a pulsar Continuar. No se ha realizado ningún cobro.' : 'The card fields could not be opened. Press Continue again. No payment has been made.')}</p>}
+                    : payment.manualError === 'MANUAL_PAYMENTS_DISABLED'
+                      ? (lang === 'es' ? 'El pago manual no está disponible en este momento.' : 'Manual payment is currently unavailable.')
+                      : (lang === 'es' ? 'No se pudieron abrir los campos de tarjeta. Vuelve a pulsar Continuar. No se ha realizado ningún cobro.' : 'The card fields could not be opened. Press Continue again. No payment has been made.')}</p>}
                   {/* Resumen dinámico de la orden */}
                   <div className="bg-[#f8fafc] rounded-2xl p-4 border border-slate-200 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mt-4">
                     <div className="flex items-center gap-3">
@@ -986,10 +996,10 @@ export default function PaymentCarousel({ manualSandboxEnabled = false }: { manu
 
                     <div className="col-span-2 pt-3 border-t border-slate-200 flex justify-between items-center">
                       <span className="font-bold text-slate-800 text-sm">{t.labelReceiptAmount}</span>
-                      <span className="font-mono font-black text-xl text-[#112a52]">{receiptData.priceReference ? `$ ${receiptData.priceReference.amount} USD` : `${receiptData.currency==='HNL'?'L ':''}${receiptData.amount} ${receiptData.currency}`}</span>
+                      <span className="font-mono font-black text-xl text-[#112a52]">{formatChargeLabel(receiptData.amount, receiptData.currency)}</span>
                     </div>
                     {receiptData.priceReference && <p className="col-span-2 text-xs leading-relaxed text-slate-600" data-testid="receipt-conversion">
-                      {simulatedPayment ? (lang==='es'?'Importe de prueba':'Test amount') : (lang==='es'?'Débito realizado':'Amount charged')}: L {receiptData.amount} {receiptData.currency}. {lang==='es'?'Tipo de cambio':'Exchange rate'}: L {Number(receiptData.priceReference.hnlPerUsd)} / USD.
+                      {chargeDisclosure(receiptData.amount, receiptData.currency, receiptData.priceReference, lang, true, simulatedPayment)}
                       {receiptData.priceReference.source === 'BCH' && ` ${lang==='es'?'Fuente':'Source'}: Banco Central de Honduras · ${receiptData.priceReference.rateDate}`}
                     </p>}
                   </div>

@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     assertSameOrigin(req);
     const session = await authenticatedSession();
     if (!['open', 'declined'].includes(session.status) || needsLegacyPaymentReview(session)) return NextResponse.json({ session: publicSession(session) });
+    if (session.currency !== 'USD') return NextResponse.json({ error: 'SESSION_CURRENCY_CHANGED' }, { status: 409 });
     const body = paymentRequestSchema.safeParse(await req.json());
     if (!body.success || !session.capture_context) return NextResponse.json({ error: 'INVALID_PAYMENT_DATA' }, { status: 400 });
     const data = body.data;
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
       !['signed-checkout','profile-bridge'].includes(session.storeganise_context.reservationAuthentication ?? '') && data.confirmReservation !== true) {
       return NextResponse.json({error:'STOREGANISE_RESERVATION_CONFIRMATION_REQUIRED'},{status:400});
     }
-    if (session.storeganise_context && !billToSchema.safeParse(data.billingDetails ?? session.bill_to).success) {
+    if (!billToSchema.safeParse(data.billingDetails ?? session.bill_to).success) {
       return NextResponse.json({error:'BILLING_DETAILS_REQUIRED'},{status:400});
     }
     if (new Date(Number(data.expirationYear), Number(data.expirationMonth), 1).getTime() <= Date.now()) {

@@ -12,7 +12,7 @@ async function main() {
   await fs.mkdir('.private', { recursive: true });
   const output = `.private/manual-${created.id}.json`;
   await fs.writeFile(output, JSON.stringify({ ...created, environment: input.environment, source: input.source,
-    originalAmount: input.amount, originalCurrency: 'USD', chargeCurrency: 'HNL', paymentStarted: false }, null, 2), { mode: 0o600 });
+    originalAmount: input.amount, originalCurrency: 'USD', chargeCurrency: 'USD', paymentStarted: false }, null, 2), { mode: 0o600 });
   console.log(JSON.stringify({ file: output, sessionId: created.id, environment: input.environment, paymentStarted: false, expiresAt: created.expiresAt }));
 }
 main().catch(error => {

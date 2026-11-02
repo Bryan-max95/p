@@ -1,5 +1,5 @@
 import PaymentCarousel from './components/payment-carousel';
-import { sandboxManualEnabled } from '@/lib/pay/sandbox-manual';
+import { manualPaymentEnabled } from '@/lib/pay/browser-manual';
 import ReservationAccess from './components/reservation-access';
 import { legacyStoreganiseEntry, type LegacyStoreganiseEntry, type StoreganiseSearchParams } from '@/lib/storeganise/browser-entry';
 
@@ -28,5 +28,5 @@ export default async function PaymentPage({searchParams}:{searchParams:Promise<S
     </section>
   </main>;
   if(entry?.kind==='reservation')return <ReservationAccess key={entry.orderId} orderId={entry.orderId} returnUrl={entry.returnUrl} />;
-  return <PaymentCarousel manualSandboxEnabled={sandboxManualEnabled()} />;
+  return <PaymentCarousel manualEnabled={manualPaymentEnabled()} />;
 }

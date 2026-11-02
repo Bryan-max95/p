@@ -40,7 +40,7 @@ test('both endpoints use the configured BAC credentials; missing secrets fail be
   assert.throws(gatewayEnvironment, /Invalid/);
 });
 
-test('requests sign the selected live or sandbox host using the same configured BAC credentials', async t => {
+test('requests sign the production host and the removed sandbox endpoint cannot be used', async t => {
   const values = configuration(t);
   const requests: Array<{ url: string; headers: Headers }> = [];
   t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
@@ -48,8 +48,9 @@ test('requests sign the selected live or sandbox host using the same configured 
     return new Response(JSON.stringify({ id: 'unit-transaction' }));
   });
   await new CyberSourceGateway('production').getPayment('unit-transaction');
-  await new CyberSourceGateway('sandbox').getPayment('unit-transaction');
-  for (const [i, environment] of (['production', 'sandbox'] as const).entries()) {
+  assert.throws(() => new CyberSourceGateway('sandbox'), /Invalid gateway environment/);
+  assert.equal(requests.length, 1);
+  for (const [i, environment] of (['production'] as const).entries()) {
     const { host, api } = gatewayEndpoints(environment);
     const request = requests[i];
     const merchant = values.CYBERSOURCE_MERCHANT_ID;
@@ -76,11 +77,11 @@ test('capture context keys, hosted libraries and Cardinal origins match the sele
     return new Response(JSON.stringify(await exportJWK(String(url).startsWith('https://api.cybersource.com/') ? liveSigning.publicKey : sandboxSigning.publicKey)));
   });
   const sandboxToken = await capture(false), liveToken = await capture(true);
-  const sandbox = new CyberSourceGateway('sandbox'), live = new CyberSourceGateway('production');
-  assert.match((await sandbox.readCaptureContext(sandboxToken)).clientLibrary, /testflex/);
+  const live = new CyberSourceGateway('production');
+  assert.throws(() => new CyberSourceGateway('sandbox'), /Invalid gateway environment/);
   assert.match((await live.readCaptureContext(liveToken)).clientLibrary, /^https:\/\/flex\./);
   await assert.rejects(live.readCaptureContext(sandboxToken));
-  assert.equal(urls.length, 2, 'The same kid needs separate verification keys per environment');
+  assert.equal(urls.length, 1, 'Only the production verification endpoint is used');
   assert.doesNotThrow(() => assertAuthenticationUrl('https://centinelapi.cardinalcommerce.com/V1/Cruise/Collect', 'production'));
   assert.throws(() => assertAuthenticationUrl('https://centinelapistag.cardinalcommerce.com/V1/Cruise/Collect', 'production'));
   assert.throws(() => assertAuthenticationUrl('https://attacker.example/', 'production'));
@@ -89,15 +90,15 @@ test('capture context keys, hosted libraries and Cardinal origins match the sele
   assert.equal(policy.includes('testflex'), false); assert.equal(policy.includes('centinelapistag'), false);
 });
 
-test('live payment serialization keeps the HNL total, capture and 3DS proof with the production signature', async t => {
+test('USD payment serialization keeps the amount, capture and 3DS proof with the production signature', async t => {
   const values = configuration(t);
   t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
     assert.equal(String(url), 'https://api.cybersource.com/pts/v2/payments');
     const headers = new Headers(init?.headers);
     const raw = String(init?.body);
     const body = JSON.parse(raw);
-    assert.equal(body.orderInformation.amountDetails.totalAmount, '5350.77');
-    assert.equal(body.orderInformation.amountDetails.currency, 'HNL');
+    assert.equal(body.orderInformation.amountDetails.totalAmount, '199.00');
+    assert.equal(body.orderInformation.amountDetails.currency, 'USD');
     assert.equal(body.processingInformation.capture, true);
     assert.equal(body.consumerAuthenticationInformation.cavv, 'fixture-cavv');
     const digest = `SHA-256=${crypto.createHash('sha256').update(raw).digest('base64')}`;
@@ -106,11 +107,11 @@ test('live payment serialization keeps the HNL total, capture and 3DS proof with
     assert.ok(headers.get('signature')?.includes(`signature="${signature}"`));
     assert.equal(headers.get('digest'), digest);
     return new Response(JSON.stringify({ id: 'fixture-payment', status: 'AUTHORIZED',
-      orderInformation: { amountDetails: { authorizedAmount: '5350.77', currency: 'HNL' } } }));
+      orderInformation: { amountDetails: { authorizedAmount: '199.00', currency: 'USD' } } }));
   });
   const result = await new CyberSourceGateway('production').pay({
     token: { tokenJwt: 'fixture-jwt', tokenId: 'fixture-token', cardType: '001', brand: 'Visa', expiresAt: '2030-01-01' },
-    reference: 'fixture-reference', amount: '5350.77', currency: 'HNL', customerId: 'fixture-customer', billTo: demoCheckout('a').billTo,
+    reference: 'fixture-reference', amount: '199.00', currency: 'USD', customerId: 'fixture-customer', billTo: demoCheckout('a').billTo,
     device: { httpAcceptContent: '*/*', httpBrowserLanguage: 'es', httpBrowserJavaEnabled: false, httpBrowserJavaScriptEnabled: true,
       httpBrowserColorDepth: 24, httpBrowserScreenHeight: 900, httpBrowserScreenWidth: 1200, httpBrowserTimeDifference: 0, userAgentBrowserValue: 'fixture' },
     authentication: { status: 'authenticated', gatewayStatus: 'AUTHENTICATION_SUCCESSFUL', commerceIndicator: 'vbv',

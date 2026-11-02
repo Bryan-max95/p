@@ -5,7 +5,7 @@ import { DEMO_AMOUNTS, DEMO_SCENARIOS, demoCurrency, DEFAULT_DEMO_SCENARIO, type
 import type { BillTo } from '@/lib/cybersource/types';
 
 export interface PriceReference {
-  amount: string; currency: 'USD'; hnlPerUsd: string;
+  amount: string; currency: 'USD'; hnlPerUsd: string; hnlAmount?: string;
   source?: 'BCH'; rateDate?: string | null; fetchedAt?: string;
 }
 
@@ -79,7 +79,7 @@ export async function paymentRequest<T>(path: string, body?: unknown): Promise<T
   return payload as T;
 }
 
-export function usePaymentSession(manualSandboxEnabled = false) {
+export function usePaymentSession(manualEnabled = false) {
   const [session, setSession] = useState<PaymentSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [localDemoUnavailable, setLocalDemoUnavailable] = useState(false);
@@ -163,7 +163,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
         if (!window.sessionStorage.getItem('pay-session-id') && !requestedDemo) return null;
         try {
           const existing = await paymentRequest<PaymentResponse>('/api/pay/session');
-          if (manualSandboxEnabled && !requestedDemo && existing.session.source === 'manual' && existing.session.status === 'expired') {
+          if (manualEnabled && !requestedDemo && existing.session.source === 'manual' && existing.session.status === 'expired') {
             window.sessionStorage.removeItem('pay-session-id');
             return null;
           }
@@ -173,7 +173,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
                 ? existing.session.priceReference?.source !== 'BCH' || existing.session.priceReference.amount !== DEMO_AMOUNTS[scenario as DemoScenario]
                 : existing.session.priceReference?.source === 'BCH' || existing.session.currency !== 'HNL' || existing.session.amount !== DEMO_AMOUNTS[scenario as DemoScenario]))))) return existing;
         } catch (failure) {
-          if (manualSandboxEnabled && !requestedDemo && failure instanceof PaymentRequestError &&
+          if (manualEnabled && !requestedDemo && failure instanceof PaymentRequestError &&
             (failure.status === 401 || failure.code === 'SESSION_ENVIRONMENT_CHANGED')) {
             window.sessionStorage.removeItem('pay-session-id');
             return null;
@@ -197,7 +197,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
       if (active) setLoading(false);
     });
     return () => { active = false; };
-  }, [acceptResponse, manualSandboxEnabled]);
+  }, [acceptResponse, manualEnabled]);
 
   const pending = uncertain || ['processing', 'unknown', 'pending', 'reconciling'].includes(session?.status ?? '');
   const awaitingStoreganise = Boolean(session?.receipt && session.storeganise && !['active','sandbox_only'].includes(session.storeganise.status));
@@ -224,7 +224,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
     try {
       return acceptResponse(await paymentRequest<PaymentResponse>(path, body));
     } catch (failure) {
-      if (failure instanceof PaymentRequestError && ['INVALID_PAYMENT_DATA', 'CARD_EXPIRED', 'BILLING_DETAILS_REQUIRED',
+      if (failure instanceof PaymentRequestError && ['INVALID_PAYMENT_DATA', 'CARD_EXPIRED', 'BILLING_DETAILS_REQUIRED', 'SESSION_CURRENCY_CHANGED',
         'INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE','STOREGANISE_CHECKOUT_UNAVAILABLE',
         'STOREGANISE_PAY_DISABLED','STOREGANISE_SANDBOX_INSTANCE_REQUIRED','STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH',
         'STOREGANISE_CUSTOMER_LOGIN_REQUIRED','STOREGANISE_RESERVATION_PENDING','STOREGANISE_RESERVATION_REFRESH_REQUIRED',
@@ -267,7 +267,7 @@ export function usePaymentSession(manualSandboxEnabled = false) {
     busy: submitting || session?.status === 'processing' || Boolean(authentication),
     requiresReview: uncertain || ['unknown', 'reconciling'].includes(session?.status ?? ''),
     interruptedAuthentication: session?.authenticationPending && !authentication,
-    canPay: Boolean(session && ['open', 'ready', 'created', 'declined', 'failed'].includes(session.status) && !submitting && !pending && !authentication),
+    canPay: Boolean(session && session.currency === 'USD' && ['open', 'ready', 'created', 'declined', 'failed'].includes(session.status) && !submitting && !pending && !authentication),
     refresh,
     completeAuthentication: () => submit('/api/pay/authentication', { transientToken: transientToken.current, step: authentication?.step,
       ...(authentication?.transactionId ? { authenticationTransactionId: authentication.transactionId } : {}) }),

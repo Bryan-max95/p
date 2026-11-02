@@ -6,7 +6,7 @@ import { assertOrderActive, assertPayable, getJob, getUser, invoiceContext, sgId
 import { storeganiseGet } from './client';
 import { createCheckoutSession, requiredUrl } from '../pay/service';
 import { transaction } from '../pay/db';
-import { currentBchRate, hnlCharge } from '../pay/exchange-rate';
+import { currentBchRate } from '../pay/exchange-rate';
 import { needsLegacyPaymentReview } from '../pay/payment-state';
 import { billToSchema } from '../pay/billing-details';
 import type { BillTo } from '../cybersource/types';
@@ -85,12 +85,12 @@ export async function openStoreganiseCheckout(value: unknown) {
         assertPayable(context);
         const amount = usdAmount(invoice.balance);
         const changed = Number(session.reference_usd_amount).toFixed(2) !== amount;
-        if (session.expires_at.getTime() <= Date.now() || changed) {
+        if (session.expires_at.getTime() <= Date.now() || changed || session.currency !== 'USD') {
           if(!rate)throw new StoreganiseIntegrationError('EXCHANGE_RATE_UNAVAILABLE',503);
-          const renewed = await client.query<SessionRow>(`UPDATE pay_sessions SET reference_usd_amount=$2,amount=$3,
+          const renewed = await client.query<SessionRow>(`UPDATE pay_sessions SET reference_usd_amount=$2,amount=$3,currency='USD',
             usd_hnl_rate=$4,fx_source='BCH',fx_rate_date=$5,fx_fetched_at=$6,expires_at=now()+interval '30 minutes',
             capture_context=NULL,updated_at=now() WHERE id=$1 RETURNING *`,
-          [session.id,amount,hnlCharge(amount,rate.hnlPerUsd),rate.hnlPerUsd,rate.rateDate,rate.fetchedAt]);
+          [session.id,amount,amount,rate.hnlPerUsd,rate.rateDate,rate.fetchedAt]);
           session = renewed.rows[0];
         }
       }

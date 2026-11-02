@@ -1,7 +1,7 @@
 'use client';
 import type { BillTo } from '@/lib/cybersource/types';
 
-/** Shown only if the authenticated Storeganise profile lacks a complete billing address. */
+/** Collect actual card billing details when a manual or Storeganise session lacks them. */
 export function BillingDetailsFields({value,language}:{value?:BillTo;language:'es'|'en'}) {
   const fields = [
     {key:'firstName',es:'Nombre',en:'First name',autocomplete:'billing given-name',max:60},

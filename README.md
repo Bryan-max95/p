@@ -1,10 +1,10 @@
 ﻿# Pay Roatan Self Storage
 
-Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Muestra el saldo en USD, calcula el cargo en HNL con la tasa BCH y guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
+Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Los pagos nuevos se envían en USD; la tasa BCH muestra el equivalente informativo en HNL. Guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
 
-Actualización del código: 16 de octubre de 2026. Con `STOREGANISE_LIVE_SANDBOX_ENABLED=true` se conserva Storeganise real y CyberSource sandbox para todos los clientes autenticados. La nueva opción `STOREGANISE_SANDBOX_ACTIVATION_ENABLED=true` permite registrar el pago de prueba y completar la ocupación real después de la aprobación. El permiso se guarda solo en checkouts nuevos; las pruebas anteriores no se aplican automáticamente. Ver [activación y variables de Vercel](ACTIVACION_STOREGANISE.md).
+Actualización del código: 2 de noviembre de 2026. La API bancaria admite únicamente producción. La entrada directa a Pay permite crear un pago manual en USD con nombre y referencia opcional; Storeganise conserva su acceso autenticado con el saldo verificado por el servidor. Ver [pagos manuales, moneda y despliegue](PAGOS_MANUALES_USD.md). La documentación de sandbox anterior se conserva como antecedente y no habilita ese entorno.
 
-Se verificó el cambio con comprobaciones locales de TypeScript, ESLint y servicios simulados. No se iniciaron el servidor ni transacciones bancarias, ni se modificaron las cuentas externas. Las credenciales y el despliegue deben verificarse con la prueba manual del operador.
+Las pruebas del cambio usan proveedores y base de datos simulados, sin transacciones bancarias ni escrituras en cuentas externas. La aceptación de las credenciales y de USD por BAC debe verificarse con la operación manual del comercio.
 
 ## Integración incorporada
 

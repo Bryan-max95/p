@@ -27,7 +27,8 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
   if (input.environment !== environment || !input.payable || !['manual', 'storeganise'].includes(source)) throw new Error('Checkout environment or source mismatch');
   if (environment === 'sandbox' && (!input.isTest || input.fiscalEnvironment !== 'test')) throw new Error('Only isolated test checkout is allowed');
   if (environment === 'production' && (input.isTest || input.isDemo || input.fiscalEnvironment !== 'production')) throw new Error('Production does not accept test checkouts');
-  if (!money(input.amount) || !['USD', 'HNL'].includes(input.currency)) throw new Error('Invalid definitive amount');
+  if (!money(input.amount) || input.currency !== 'USD') throw new Error('New checkouts require a USD amount');
+  if (source === 'manual' && input.storeganiseContext) throw new Error('Manual checkout cannot bind a Storeganise reservation');
   const allowed = new Set((process.env.STOREGANISE_TEST_CUSTOMER_IDS ?? '').split(',').map(v => v.trim()).filter(Boolean));
   const liveSandbox = isLiveStoreganiseSandbox({ environment, storeganise_context: input.storeganiseContext });
   const binding = input.storeganiseContext ? { ...input.storeganiseContext } : undefined;
@@ -60,19 +61,20 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
     if (row.customer_id !== input.customerId || row.unit_id !== input.unitId || row.invoice_id !== (input.invoiceId ?? null) ||
       originalCurrency !== input.currency || Number(originalAmount).toFixed(2) !== input.amount ||
       row.order_id !== (input.orderId ?? null) || row.is_demo !== (input.isDemo === true) || row.environment !== environment ||
-      (row.checkout_source ?? 'storeganise') !== source) throw new Error('Checkout event does not match its persisted session');
+      (row.checkout_source ?? 'storeganise') !== source || row.client_name !== input.clientName || row.unit_name !== input.unitName) throw new Error('Checkout event does not match its persisted session');
     return { id: row.id, launchToken, launchUrl: `${publicUrl}/?session=${encodeURIComponent(launchToken)}`, expiresAt: row.expires_at.toISOString() };
   };
   const existing = await runQuery<SessionRow>('SELECT * FROM pay_sessions WHERE event_id=$1', [input.eventId]);
   if (existing.rows[0]) return sessionResult(existing.rows[0]);
   if(storage&&input.currency==='USD'&&!storage.rate)throw new Error('Exchange quote required before checkout transaction');
   const rate = input.currency === 'USD' ? storage?.rate ?? await currentBchRate() : null;
-  const chargeAmount = rate ? hnlCharge(input.amount, rate.hnlPerUsd) : input.amount;
+  // Keep the bank charge in USD; the BCH quote is an informational HNL equivalent.
+  if (rate) hnlCharge(input.amount, rate.hnlPerUsd);
   const result = await runQuery<SessionRow>(`INSERT INTO pay_sessions
     (id,event_id,launch_hash,customer_id,order_id,invoice_id,unit_id,client_name,unit_name,concept,currency,amount,bill_to,environment,return_url,expires_at,is_demo,portal_status,reference_usd_amount,usd_hnl_rate,fx_source,fx_rate_date,fx_fetched_at,checkout_source,storeganise_context,storeganise_status)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$22,$14,now()+interval '30 minutes',$15,$16,$17,$18,$19,$20,$21,$23,$24,$25)
     ON CONFLICT(event_id) DO UPDATE SET updated_at=now() RETURNING *`,
-    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',rate ? input.amount : null,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled']);
+    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'USD',input.amount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',input.amount,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled']);
   return sessionResult(result.rows[0]);
 }
 
@@ -100,12 +102,15 @@ export function publicSession(row: SessionRow) {
   const isolatedSandbox = liveSandbox && !hasSandboxActivation(row);
   const legacyReview = needsLegacyPaymentReview(row);
   const status = legacyReview ? 'unknown' : ['open','declined'].includes(row.status) && row.expires_at.getTime() <= Date.now() ? 'expired' : row.status;
-  const priceReference = row.currency === 'HNL' && row.reference_usd_amount != null && row.usd_hnl_rate != null ? {
+  const priceReference = row.reference_usd_amount != null && row.usd_hnl_rate != null ? {
     amount: Number(row.reference_usd_amount).toFixed(2), currency: 'USD' as const, hnlPerUsd: Number(row.usd_hnl_rate).toFixed(6),
+    hnlAmount: hnlCharge(Number(row.reference_usd_amount).toFixed(2), row.usd_hnl_rate),
     ...(row.fx_source === 'BCH' ? { source: 'BCH' as const, rateDate: row.fx_rate_date, fetchedAt: row.fx_fetched_at?.toISOString() } : {}),
   } : undefined;
   return { id:row.id,clientName:row.client_name,unitName:row.unit_name,concept:row.concept,currency:row.currency,amount:Number(row.amount).toFixed(2),status,portalStatus:row.portal_status,isDemo:row.is_demo,environment:row.environment,source:row.checkout_source ?? 'storeganise',
     ...(priceReference ? { priceReference } : {}),
+    billingRequired: !billToSchema.safeParse(row.bill_to).success,
+    billingDetails: row.bill_to,
     authenticationPending: row.status==='pending' && ['DEVICE_COLLECTION_REQUIRED','CHALLENGE_REQUIRED'].includes(row.gateway_status ?? ''),
     ...(['declined', 'unknown'].includes(status) ? { failureCode: legacyReview ? 'PAYMENT_NOT_CONFIRMED' : paymentFailureCode(row.failure_reason, row.gateway_status) } : {}),
     ...(row.storeganise_context ? {
@@ -114,8 +119,6 @@ export function publicSession(row: SessionRow) {
       storeganise: { status: isolatedSandbox ? 'sandbox_only' : row.storeganise_status ?? 'waiting_payment', paymentId: isolatedSandbox ? undefined : row.storeganise_payment_id ?? undefined,
         sandboxActivation: hasSandboxActivation(row),
         returnUrl: storeganiseReturnUrl(row.return_url) },
-      billingRequired: !billToSchema.safeParse(row.bill_to).success,
-      billingDetails: row.bill_to,
     } : {}),
     ...(row.is_demo ? { gatewayStatus: row.gateway_status, failureReason: row.failure_reason, transactionId: row.gateway_transaction_id } : {}),
     ...(row.status==='succeeded'&&row.gateway_transaction_id?{receipt:{authCode:row.authorization_code,transactionId:row.gateway_transaction_id,date:(row.paid_at??row.created_at).toISOString(),cardLast4:row.card_last4,cardBrand:row.card_brand,amount:Number(row.amount).toFixed(2),unit:row.unit_name,client:row.client_name,currency:row.currency,...(priceReference ? { priceReference } : {})}}:{}) };
@@ -140,15 +143,16 @@ export async function beginAttempt(sessionId:string, tokenJti?:string, mode: 'pa
      if (session.is_demo || mode !== 'payment') throw new Error('Test attempts cannot use production');
      await loadCredentials('production');
    }
-   if (session.currency !== 'HNL') throw new Error('Create a new checkout with an HNL charge');
-   if (session.fx_source === 'BCH' && (!session.reference_usd_amount || !session.usd_hnl_rate || !session.fx_rate_date || !session.fx_fetched_at ||
-     hnlCharge(Number(session.reference_usd_amount).toFixed(2), session.usd_hnl_rate) !== Number(session.amount).toFixed(2))) throw new Error('Invalid stored exchange quote');
+   if (session.currency !== 'USD') throw new StoreganiseIntegrationError('SESSION_CURRENCY_CHANGED');
+   if (session.fx_source !== 'BCH' || !session.reference_usd_amount || !session.usd_hnl_rate || !session.fx_rate_date || !session.fx_fetched_at ||
+     Number(session.reference_usd_amount).toFixed(2) !== Number(session.amount).toFixed(2)) throw new Error('Invalid stored exchange quote');
+   hnlCharge(Number(session.amount).toFixed(2), session.usd_hnl_rate);
    if (session.is_demo && !demoScenarioForAmount(Number(session.fx_source === 'BCH' ? session.reference_usd_amount : session.amount).toFixed(2), session.fx_source === 'BCH' ? 'USD' : 'HNL')) throw new Error('Create an allowed sandbox demo');
    if (mode === 'authorization_only' && !session.is_demo) throw new Error('Diagnostic requires an isolated demo');
    if (needsLegacyPaymentReview(session)) throw new Error('Existing transaction must be reconciled before retrying');
    if (!['open','declined'].includes(session.status)) throw new Error('Payment already active or closed');
    if (session.expires_at.getTime() <= Date.now()) throw new Error('Session expired');
-   if (session.storeganise_context) {
+   if (session.storeganise_context || session.checkout_source === 'manual') {
      const details = billToSchema.parse(billingDetails ?? session.bill_to);
      await client.query('UPDATE pay_sessions SET bill_to=$2 WHERE id=$1', [sessionId, JSON.stringify(details)]);
      session.bill_to = details;

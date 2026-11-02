@@ -1,12 +1,12 @@
-# Pagos manuales y cobros en USD
+# Precios en USD y cobros en lempiras
 
 Actualización del 2 de noviembre de 2026.
 
-La entrada directa al dominio de Pay permite escribir nombre, referencia opcional y un monto positivo en USD. Continuar crea una sesión pendiente con ese monto y muestra los campos seguros de tarjeta y los datos reales de facturación. El cobro se solicita solo al pulsar pagar y completar la verificación bancaria requerida.
+La entrada directa al dominio de Pay permite escribir nombre, referencia opcional y un precio positivo en USD. Continuar crea una sesión pendiente con el monto convertido a HNL y muestra los campos seguros de tarjeta y los datos reales de facturación. El cobro se solicita solo al pulsar pagar y completar la verificación bancaria requerida.
 
-Los pagos nuevos, tanto manuales como de Storeganise, conservan `amount` y `currency=USD` durante 3DS, el envío a CyberSource y el comprobante. La tasa BCH queda fijada en la sesión para mostrar el equivalente informativo en HNL. Por ejemplo, USD 99.00 con una tasa de 26.50 muestra L 2,623.50 como referencia y solicita USD 99.00 al banco. La moneda enviada se especifica en `orderInformation.amountDetails.currency`, conforme a la [documentación de CyberSource](https://developer.cybersource.com/docs/cybs/en-us/payments/developer/gpn/rest/payments.html).
+Los pagos nuevos, tanto manuales como de Storeganise, guardan el precio original USD y la tasa BCH. El monto convertido (`amount`) y `currency=HNL` se conservan durante 3DS, el envío a CyberSource y el comprobante. Por ejemplo, USD 99.00 con una tasa de 26.50 solicita L 2,623.50 HNL al banco. La pantalla muestra el precio USD, la tasa y el total HNL antes de pagar. El servidor envía `orderInformation.amountDetails.currency=HNL` a `https://api.cybersource.com` y bloquea nuevas solicitudes financieras en USD.
 
-El script de Tag Manager no requiere cambios. Storeganise sigue determinando el propietario, la reserva y el saldo desde su API. Un pago manual independiente no asigna ni liquida una reserva automáticamente. La sincronización existente de Storeganise conserva sus comprobaciones; sus notas identifican el cobro en USD y el equivalente HNL.
+El script de Tag Manager no requiere cambios. Storeganise sigue determinando el propietario, la reserva y el saldo desde su API. Un pago manual independiente no asigna ni liquida una reserva automáticamente. La sincronización existente registra el saldo original USD de la factura de Storeganise; sus notas identifican el cobro bancario en HNL, el precio USD y la tasa BCH.
 
 ## Configuración y despliegue
 
@@ -17,6 +17,6 @@ El script de Tag Manager no requiere cambios. Storeganise sigue determinando el 
 
 ## Sesiones anteriores y validación
 
-Los cobros históricos y los pagos en proceso conservan su moneda y comprobante originales. No se convierten pagos ya enviados. Los enlaces HNL sin pago iniciado deben abrirse nuevamente: Storeganise renueva las sesiones abiertas o rechazadas sin resultado incierto con el saldo verificado en USD. Los pagos manuales anteriores pueden iniciar una sesión nueva en USD. El servidor bloquea nuevos intentos de cobro con una sesión HNL.
+Los cobros históricos y los pagos en proceso conservan su moneda y comprobante originales. No se convierten pagos ya enviados. Los enlaces USD sin pago iniciado deben abrirse nuevamente: Storeganise renueva a HNL las sesiones abiertas o rechazadas sin resultado incierto, usando el saldo USD verificado. Un pago manual USD sin operación pendiente puede abrir un nuevo enlace con conversión a HNL. Los intentos con resultado incierto conservan el bloqueo y requieren conciliación; este cambio no los reintenta ni los declara pagados.
 
-Las pruebas usan proveedores y base de datos simulados. Verifican monto USD, equivalente BCH, facturación obligatoria, recuperación de una respuesta perdida, ausencia de pagos duplicados y conservación del vínculo de Storeganise. No acreditan que BAC haya habilitado USD para las credenciales del comercio: esa aceptación se observa en una operación iniciada por el operador. No se ejecutan cobros automáticos para validar este cambio.
+Las pruebas usan proveedores y base de datos simulados. Verifican conversión BCH, envío en HNL, rechazo de nuevos cobros USD, facturación obligatoria, recuperación de una respuesta perdida, ausencia de pagos duplicados y conservación del vínculo de Storeganise. No certifican la aceptación bancaria en producción. No se ejecutan cobros automáticos para validar este cambio.

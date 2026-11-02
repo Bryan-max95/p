@@ -21,7 +21,7 @@ export function paymentFailureCode(reason: string | null | undefined, status: st
 }
 
 export function paymentFailureMessage(reason: string | undefined, status: string | undefined, language: Language) {
-  if (reason === 'SESSION_CURRENCY_CHANGED') return say(language, 'Este enlace anterior está en lempiras. Abra un pago nuevo para revisar y pagar el monto en USD.', 'This older link is in lempiras. Open a new payment to review and pay the USD amount.');
+  if (reason === 'SESSION_CURRENCY_CHANGED') return say(language, 'Este enlace anterior está en dólares. Abra un pago nuevo para revisar el cobro en lempiras (HNL).', 'This older link charges US dollars. Open a new payment to review the charge in lempiras (HNL).');
   if(reason==='STOREGANISE_CUSTOMER_LOGIN_REQUIRED')return say(language,'Su acceso a Storeganise venció. Abra de nuevo el pago desde su reserva e inicie sesión. No se inició el cobro.','Your Storeganise session expired. Reopen payment from your booking and sign in. No charge was started.');
   if(reason==='STOREGANISE_RESERVATION_PENDING')return say(language,'Storeganise todavía debe confirmar la reserva y preparar su registro de pago. Consulte el estado de su reserva antes de continuar. No se inició el cobro.','Storeganise still needs to confirm the booking and prepare its payment record. Check your booking before continuing. No charge was started.');
   if(reason==='STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED')return say(language,'Estamos pendientes de confirmar el envío de su reserva a Storeganise. Contacte a Roatan Self Storage si continúa pendiente. No se inició el cobro.','We are awaiting confirmation that your booking was submitted to Storeganise. Contact Roatan Self Storage if it remains pending. No charge was started.');

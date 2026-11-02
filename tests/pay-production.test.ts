@@ -90,15 +90,15 @@ test('capture context keys, hosted libraries and Cardinal origins match the sele
   assert.equal(policy.includes('testflex'), false); assert.equal(policy.includes('centinelapistag'), false);
 });
 
-test('USD payment serialization keeps the amount, capture and 3DS proof with the production signature', async t => {
+test('HNL payment serialization keeps the converted amount, capture and 3DS proof with the production signature', async t => {
   const values = configuration(t);
   t.mock.method(globalThis, 'fetch', async (url: string | URL | Request, init?: RequestInit) => {
     assert.equal(String(url), 'https://api.cybersource.com/pts/v2/payments');
     const headers = new Headers(init?.headers);
     const raw = String(init?.body);
     const body = JSON.parse(raw);
-    assert.equal(body.orderInformation.amountDetails.totalAmount, '199.00');
-    assert.equal(body.orderInformation.amountDetails.currency, 'USD');
+    assert.equal(body.orderInformation.amountDetails.totalAmount, '5273.50');
+    assert.equal(body.orderInformation.amountDetails.currency, 'HNL');
     assert.equal(body.processingInformation.capture, true);
     assert.equal(body.consumerAuthenticationInformation.cavv, 'fixture-cavv');
     const digest = `SHA-256=${crypto.createHash('sha256').update(raw).digest('base64')}`;
@@ -107,17 +107,25 @@ test('USD payment serialization keeps the amount, capture and 3DS proof with the
     assert.ok(headers.get('signature')?.includes(`signature="${signature}"`));
     assert.equal(headers.get('digest'), digest);
     return new Response(JSON.stringify({ id: 'fixture-payment', status: 'AUTHORIZED',
-      orderInformation: { amountDetails: { authorizedAmount: '199.00', currency: 'USD' } } }));
+      orderInformation: { amountDetails: { authorizedAmount: '5273.50', currency: 'HNL' } } }));
   });
   const result = await new CyberSourceGateway('production').pay({
     token: { tokenJwt: 'fixture-jwt', tokenId: 'fixture-token', cardType: '001', brand: 'Visa', expiresAt: '2030-01-01' },
-    reference: 'fixture-reference', amount: '199.00', currency: 'USD', customerId: 'fixture-customer', billTo: demoCheckout('a').billTo,
+    reference: 'fixture-reference', amount: '5273.50', currency: 'HNL', customerId: 'fixture-customer', billTo: demoCheckout('a').billTo,
     device: { httpAcceptContent: '*/*', httpBrowserLanguage: 'es', httpBrowserJavaEnabled: false, httpBrowserJavaScriptEnabled: true,
       httpBrowserColorDepth: 24, httpBrowserScreenHeight: 900, httpBrowserScreenWidth: 1200, httpBrowserTimeDifference: 0, userAgentBrowserValue: 'fixture' },
     authentication: { status: 'authenticated', gatewayStatus: 'AUTHENTICATION_SUCCESSFUL', commerceIndicator: 'vbv',
       authentication: { cavv: 'fixture-cavv', paresStatus: 'Y', eciRaw: '05' } },
   });
   assert.equal(result.status, 'succeeded');
+});
+
+test('the gateway refuses USD charges before contacting CyberSource', async t => {
+  configuration(t);
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => { throw new Error('Unexpected provider call'); });
+  const input = { currency: 'USD' } as Parameters<CyberSourceGateway['pay']>[0];
+  await assert.rejects(new CyberSourceGateway('production').pay(input), /Only HNL payments are enabled/);
+  assert.equal(fetchMock.mock.callCount(), 0);
 });
 
 test('manual links use an operator-defined USD amount and cannot be converted into browser-supplied payment totals', t => {

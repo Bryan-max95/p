@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'no-store' };
 
-/** Prepare a standalone USD session. No card data or financial request here. */
+/** Prepare a standalone HNL charge from a USD price. No financial request here. */
 export async function POST(req: NextRequest) {
   if (!manualPaymentEnabled()) return NextResponse.json({ error: 'MANUAL_PAYMENTS_DISABLED' }, { status: 404, headers });
   try { assertSameOrigin(req); }

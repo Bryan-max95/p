@@ -66,15 +66,15 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
   };
   const existing = await runQuery<SessionRow>('SELECT * FROM pay_sessions WHERE event_id=$1', [input.eventId]);
   if (existing.rows[0]) return sessionResult(existing.rows[0]);
-  if(storage&&input.currency==='USD'&&!storage.rate)throw new Error('Exchange quote required before checkout transaction');
-  const rate = input.currency === 'USD' ? storage?.rate ?? await currentBchRate() : null;
-  // Keep the bank charge in USD; the BCH quote is an informational HNL equivalent.
-  if (rate) hnlCharge(input.amount, rate.hnlPerUsd);
+  if(storage&&!storage.rate)throw new Error('Exchange quote required before checkout transaction');
+  const rate = storage?.rate ?? await currentBchRate();
+  // Storeganise and manual prices are in USD; charge the exact persisted BCH conversion in HNL.
+  const chargeAmount = hnlCharge(input.amount, rate.hnlPerUsd);
   const result = await runQuery<SessionRow>(`INSERT INTO pay_sessions
     (id,event_id,launch_hash,customer_id,order_id,invoice_id,unit_id,client_name,unit_name,concept,currency,amount,bill_to,environment,return_url,expires_at,is_demo,portal_status,reference_usd_amount,usd_hnl_rate,fx_source,fx_rate_date,fx_fetched_at,checkout_source,storeganise_context,storeganise_status)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$22,$14,now()+interval '30 minutes',$15,$16,$17,$18,$19,$20,$21,$23,$24,$25)
     ON CONFLICT(event_id) DO UPDATE SET updated_at=now() RETURNING *`,
-    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'USD',input.amount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',input.amount,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled']);
+    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',input.amount,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled']);
   return sessionResult(result.rows[0]);
 }
 
@@ -143,10 +143,9 @@ export async function beginAttempt(sessionId:string, tokenJti?:string, mode: 'pa
      if (session.is_demo || mode !== 'payment') throw new Error('Test attempts cannot use production');
      await loadCredentials('production');
    }
-   if (session.currency !== 'USD') throw new StoreganiseIntegrationError('SESSION_CURRENCY_CHANGED');
+   if (session.currency !== 'HNL') throw new StoreganiseIntegrationError('SESSION_CURRENCY_CHANGED');
    if (session.fx_source !== 'BCH' || !session.reference_usd_amount || !session.usd_hnl_rate || !session.fx_rate_date || !session.fx_fetched_at ||
-     Number(session.reference_usd_amount).toFixed(2) !== Number(session.amount).toFixed(2)) throw new Error('Invalid stored exchange quote');
-   hnlCharge(Number(session.amount).toFixed(2), session.usd_hnl_rate);
+     hnlCharge(Number(session.reference_usd_amount).toFixed(2), session.usd_hnl_rate) !== Number(session.amount).toFixed(2)) throw new Error('Invalid stored exchange quote');
    if (session.is_demo && !demoScenarioForAmount(Number(session.fx_source === 'BCH' ? session.reference_usd_amount : session.amount).toFixed(2), session.fx_source === 'BCH' ? 'USD' : 'HNL')) throw new Error('Create an allowed sandbox demo');
    if (mode === 'authorization_only' && !session.is_demo) throw new Error('Diagnostic requires an isolated demo');
    if (needsLegacyPaymentReview(session)) throw new Error('Existing transaction must be reconciled before retrying');

@@ -183,6 +183,8 @@ export class CyberSourceGateway {
 
   async pay(input: { token: VerifiedTransientToken; reference: string; amount: string; currency: string;
     billTo: BillTo; customerId: string; device: BrowserDevice; authentication: AuthenticationResult }): Promise<PaymentResult> {
+    // Existing USD receipts remain readable; no new financial request may charge USD.
+    if (input.currency !== 'HNL') throw new Error('Only HNL payments are enabled');
     const auth = input.authentication;
     if (auth.status !== 'authenticated' || !auth.commerceIndicator ||
       (input.token.cardType === '002' ? !auth.authentication?.ucafAuthenticationData || !auth.authentication.ucafCollectionIndicator : !auth.authentication?.cavv)) {

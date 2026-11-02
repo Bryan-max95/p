@@ -94,7 +94,7 @@ function fixture(t: TestContext, customer = owner) {
       sessions.set(s.id, s); rows = [s];
     } else if (sql.startsWith('UPDATE pay_sessions SET reference_usd_amount=')) {
       const s = sessions.get(String(values[0]))!;
-      Object.assign(s, { reference_usd_amount: values[1], amount: values[2], currency: sql.includes("currency='USD'") ? 'USD' : s.currency,
+      Object.assign(s, { reference_usd_amount: values[1], amount: values[2], currency: sql.includes("currency='HNL'") ? 'HNL' : s.currency,
         usd_hnl_rate: values[3], fx_rate_date: values[4], fx_fetched_at: new Date(String(values[5])),
         expires_at: new Date(Date.now() + 1800000), capture_context: undefined });
       if (values.length > 6) Object.assign(s, { unit_id: values[6], unit_name: values[7], storeganise_context: JSON.parse(String(values[8])) });
@@ -205,8 +205,8 @@ test('private profile proof opens the correct draft carousel without invoice or 
   assert.equal(f.sessions.size, 1);
   const session = [...f.sessions.values()][0];
   assert.equal(session.customer_id, owner); assert.equal(session.order_id, orderId);
-  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '199.00');
-  assert.equal(session.currency, 'USD');
+  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '5273.50');
+  assert.equal(session.currency, 'HNL');
   assert.equal(session.unit_id, typeId); assert.equal(session.invoice_id, null);
   assert.equal(session.storeganise_context?.reservationAuthentication, 'profile-bridge');
   assert.equal(publicSession(session).requiresReservationConfirmation, false);
@@ -323,12 +323,12 @@ test('confirmed invoice uses exact ledger owner, unit and balance', async t => {
   await redeemProfileBridge(f.deliveredInput(), booking);
   const session = [...f.sessions.values()][0];
   assert.equal(session.customer_id, owner); assert.equal(session.unit_id, unitId); assert.equal(session.invoice_id, invoiceId);
-  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '199.00');
-  assert.equal(session.currency, 'USD');
+  assert.equal(session.reference_usd_amount, '199.00'); assert.equal(session.amount, '5273.50');
+  assert.equal(session.currency, 'HNL');
   assert.equal(f.requests.some(r => r.path.includes('previewInvoice')), false);
 });
 
-test('renewed unpaid Storeganise checkouts move to USD while pending and paid operations retain their currency', async t => {
+test('renewed unpaid Storeganise checkouts move to HNL while pending and paid operations retain their currency', async t => {
   for (const invoice of [false, true]) await t.test(invoice ? 'invoice' : 'reservation', async st => {
     const f = fixture(st); f.state.invoice = invoice;
     const open = () => invoice
@@ -337,18 +337,18 @@ test('renewed unpaid Storeganise checkouts move to USD while pending and paid op
     const created = await open();
     const row = f.sessions.get(created.sessionId)!;
     for (const status of ['pending', 'processing', 'unknown', 'succeeded', 'open', 'declined']) {
-      Object.assign(row, { status, currency: 'HNL', amount: '5273.50', capture_context: 'old-context' });
+      Object.assign(row, { status, currency: 'USD', amount: '199.00', capture_context: 'old-context' });
       const result = await open();
       assert.equal(result.sessionId, created.sessionId);
       const renewable = ['open', 'declined'].includes(status);
-      assert.equal(row.currency, renewable ? 'USD' : 'HNL');
-      assert.equal(row.amount, renewable ? '199.00' : '5273.50');
+      assert.equal(row.currency, renewable ? 'HNL' : 'USD');
+      assert.equal(row.amount, renewable ? '5273.50' : '199.00');
       assert.equal(row.capture_context, renewable ? undefined : 'old-context');
       assert.equal(row.reference_usd_amount, '199.00');
     }
-    Object.assign(row, { status: 'declined', currency: 'HNL', amount: '5273.50', gateway_status: 'HTTP_400', gateway_transaction_id: 'uncertain' });
+    Object.assign(row, { status: 'declined', currency: 'USD', amount: '199.00', gateway_status: 'HTTP_400', gateway_transaction_id: 'uncertain' });
     await open();
-    assert.equal(row.currency, 'HNL'); assert.equal(row.amount, '5273.50');
+    assert.equal(row.currency, 'USD'); assert.equal(row.amount, '199.00');
     assert.equal(f.sessions.size, 1);
     assert.equal(f.requests.some(r => /payments|steps|submit|cybersource/.test(r.path)), false);
   });

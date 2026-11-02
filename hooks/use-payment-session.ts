@@ -267,7 +267,7 @@ export function usePaymentSession(manualEnabled = false) {
     busy: submitting || session?.status === 'processing' || Boolean(authentication),
     requiresReview: uncertain || ['unknown', 'reconciling'].includes(session?.status ?? ''),
     interruptedAuthentication: session?.authenticationPending && !authentication,
-    canPay: Boolean(session && session.currency === 'USD' && ['open', 'ready', 'created', 'declined', 'failed'].includes(session.status) && !submitting && !pending && !authentication),
+    canPay: Boolean(session && session.currency === 'HNL' && ['open', 'ready', 'created', 'declined', 'failed'].includes(session.status) && !submitting && !pending && !authentication),
     refresh,
     completeAuthentication: () => submit('/api/pay/authentication', { transientToken: transientToken.current, step: authentication?.step,
       ...(authentication?.transactionId ? { authenticationTransactionId: authentication.transactionId } : {}) }),

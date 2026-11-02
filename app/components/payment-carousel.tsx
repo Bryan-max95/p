@@ -299,10 +299,10 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
             window.location.assign(`/?demo=${payment.session?.unitName === 'DEMO-B' ? 'b' : 'a'}&scenario=${scenario}`);
           }}>{demoCurrency(scenario) === 'USD' ? '$' : 'L'} {DEMO_AMOUNTS[scenario]} {demoCurrency(scenario)}</button>)}
         </div>}
-        {payment.session?.currency === 'HNL' && ['open', 'declined', 'expired'].includes(payment.session.status) && !payment.requiresReview && <div role="alert" className="mb-4 rounded-xl bg-amber-50 p-4 text-xs text-amber-900">
+        {payment.session?.currency === 'USD' && ['open', 'declined', 'expired'].includes(payment.session.status) && !payment.requiresReview && <div role="alert" className="mb-4 rounded-xl bg-amber-50 p-4 text-xs text-amber-900">
           <p>{paymentFailureMessage('SESSION_CURRENCY_CHANGED', undefined, lang)}</p>
           {payment.session.storeganise ? <a href={payment.session.storeganise.returnUrl} className="mt-2 inline-block font-bold underline">{lang === 'es' ? 'Volver a Storeganise' : 'Return to Storeganise'}</a>
-            : <button type="button" onClick={handleReset} className="mt-2 font-bold underline">{lang === 'es' ? 'Nuevo pago en USD' : 'New USD payment'}</button>}
+            : <button type="button" onClick={handleReset} className="mt-2 font-bold underline">{lang === 'es' ? 'Nuevo pago en lempiras' : 'New payment in lempiras'}</button>}
         </div>}
         
         {/* Selector de idioma minimalista en la esquina superior derecha */}
@@ -575,10 +575,10 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
                     <h2 className="text-lg font-display font-extrabold text-slate-900">
-                      {manualEntry ? (lang === 'es' ? 'Pago manual en dólares' : 'Manual payment in USD') : t.step1Title}
+                      {t.step1Title}
                     </h2>
                     <p className="text-xs text-slate-500 mt-0.5">
-                      {manualEntry ? (lang === 'es' ? 'Ingrese su nombre y el monto en USD. Antes de pagar podrá revisar el total y su equivalente en lempiras.' : 'Enter your name and the USD amount. Review the total and its lempira equivalent before paying.') : t.step1Desc}
+                      {t.step1Desc}
                     </p>
                   </div>
                   
@@ -675,7 +675,7 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                   </div>
 
                   {manualEntry && <p className="text-xs text-slate-600">{manualEnabled
-                    ? (lang === 'es' ? 'El cobro se enviará en dólares (USD). Los lempiras se muestran como referencia.' : 'The charge will be sent in US dollars (USD). Lempiras are shown for reference.')
+                    ? (lang === 'es' ? 'Ingrese el precio en USD. El cobro se enviará en lempiras (HNL) con la tasa BCH; podrá revisar el total antes de pagar.' : 'Enter the USD price. The charge will be sent in lempiras (HNL) using the BCH rate; review the total before paying.')
                     : (lang === 'es' ? 'El pago manual no está disponible. Abra su pago desde Storeganise.' : 'Manual payment is unavailable. Open your payment from Storeganise.')}</p>}
                   {payment.preparingManual && <p role="status" className="text-xs text-slate-600">{lang === 'es' ? 'Preparando los campos de tarjeta…' : 'Preparing the card fields…'}</p>}
                   {payment.manualError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{payment.manualError === 'EXCHANGE_RATE_UNAVAILABLE'

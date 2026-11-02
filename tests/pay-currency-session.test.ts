@@ -103,10 +103,10 @@ test('manual input cannot inject a reservation, card, currency or invented billi
   }
 });
 
-test('manual preparation creates a USD session without payment and requires actual billing before 3DS', async t => {
+test('manual preparation creates an HNL session without payment and requires actual billing before 3DS', async t => {
   const { sessions, state } = fixture(t);
   const created = await createCheckoutSession(browserManualInput(draft())), row = sessions.get(created.id)!;
-  assert.equal(row.currency, 'USD'); assert.equal(row.amount, '99.00');
+  assert.equal(row.currency, 'HNL'); assert.equal(row.amount, '2623.50');
   assert.equal(row.reference_usd_amount, '99.00'); assert.equal(row.usd_hnl_rate, '26.500000');
   assert.equal(row.storeganise_context, null); assert.equal(row.storeganise_status, 'disabled');
   assert.equal(row.portal_status, 'disabled'); assert.equal(state.attempts, 0);
@@ -117,17 +117,17 @@ test('manual preparation creates a USD session without payment and requires actu
   assert.equal(state.attempts, 0);
   const attempt = await beginAttempt(row.id, 'fake-token', 'payment', billTo);
   assert.deepEqual(attempt.session.bill_to, billTo);
-  assert.equal(attempt.session.amount, '99.00'); assert.equal(attempt.session.currency, 'USD');
+  assert.equal(attempt.session.amount, '2623.50'); assert.equal(attempt.session.currency, 'HNL');
   assert.equal(state.attempts, 1);
   await assert.rejects(beginAttempt(row.id, 'another-token', 'payment', billTo), /already active/);
 });
 
-test('BCH changes update the reference equivalent, never the USD charge or an existing session', async t => {
+test('BCH changes affect new HNL quotes without changing the USD price or an existing quote', async t => {
   const { sessions, state } = fixture(t);
   const input = browserManualInput(draft()), a = await createCheckoutSession(input);
   state.rate = 27; state.cache!.fetchedAt = new Date(Date.now() - 3600001).toISOString();
   const b = await createCheckoutSession(browserManualInput(draft()));
-  assert.equal(sessions.get(a.id)!.amount, '99.00'); assert.equal(sessions.get(b.id)!.amount, '99.00');
+  assert.equal(sessions.get(a.id)!.amount, '2623.50'); assert.equal(sessions.get(b.id)!.amount, '2673.00');
   assert.equal(publicSession(sessions.get(a.id)!).priceReference?.hnlAmount, '2623.50');
   assert.equal(publicSession(sessions.get(b.id)!).priceReference?.hnlAmount, '2673.00');
   const calls = state.requests; delete process.env.BCH_API_KEY;
@@ -174,7 +174,7 @@ test('CLI USD links still work and manual checkouts cannot have a Storeganise bi
   const input = manualCheckoutInput({ reference: 'OPERATOR-1', customerId: 'operator-client', unitId: 'unit-A',
     clientName: 'Client', unitName: 'Unit A', concept: 'Rent', amount: '199.00', billTo });
   const created = await createCheckoutSession(input);
-  assert.equal(sessions.get(created.id)!.amount, '199.00'); assert.equal(state.attempts, 0);
+  assert.equal(sessions.get(created.id)!.amount, '5273.50'); assert.equal(state.attempts, 0);
   assert.equal(publicSession(sessions.get(created.id)!).billingRequired, false);
 });
 
@@ -185,7 +185,7 @@ test('Storeganise input preserves its owner, invoice, USD balance and binding', 
   const created = await createCheckoutSession({ ...browserManualInput(draft()), source: 'storeganise',
     customerId: 'customer', unitId: 'unit', invoiceId: 'invoice', storeganiseContext: binding, billTo });
   const row = sessions.get(created.id)!;
-  assert.equal(row.amount, '99.00'); assert.equal(row.currency, 'USD');
+  assert.equal(row.amount, '2623.50'); assert.equal(row.currency, 'HNL');
   assert.equal(row.customer_id, 'customer'); assert.equal(row.invoice_id, 'invoice');
   assert.deepEqual(row.storeganise_context, binding); assert.equal(row.storeganise_status, 'waiting_payment');
 });
@@ -199,29 +199,29 @@ test('BCH failures never fabricate an exchange rate or start a charge', async t 
   assert.equal(state.inserts, 0); assert.equal(state.attempts, 0);
 });
 
-test('tampered amounts, expired sessions and old HNL sessions cannot start new charges', async t => {
+test('tampered amounts, expired sessions and old USD sessions cannot start new charges', async t => {
   const { sessions, state } = fixture(t);
   const created = await createCheckoutSession(browserManualInput(draft())), row = sessions.get(created.id)!;
   row.amount = '1.00';
   await assert.rejects(beginAttempt(row.id, undefined, 'payment', billTo), /Invalid stored exchange quote/);
-  row.amount = '99.00'; row.expires_at = new Date(0);
+  row.amount = '2623.50'; row.expires_at = new Date(0);
   await assert.rejects(beginAttempt(row.id, undefined, 'payment', billTo), /Session expired/);
-  row.currency = 'HNL'; row.amount = '2623.50';
+  row.currency = 'USD'; row.amount = '99.00';
   await assert.rejects(beginAttempt(row.id, undefined, 'payment', billTo), /SESSION_CURRENCY_CHANGED/);
   row.status = 'succeeded'; row.gateway_transaction_id = 'historical-transaction';
   const receipt = publicSession(row).receipt!;
-  assert.equal(receipt.amount, '2623.50'); assert.equal(receipt.currency, 'HNL'); assert.equal(state.attempts, 0);
+  assert.equal(receipt.amount, '99.00'); assert.equal(receipt.currency, 'USD'); assert.equal(state.attempts, 0);
   await assert.rejects(createCheckoutSession({ ...browserManualInput(draft()), currency: 'HNL' }), /USD amount/);
 });
 
-test('checkout and receipt state USD charged and the informational HNL equivalent', async t => {
+test('checkout and receipt state the HNL charge and USD reference price', async t => {
   const { sessions } = fixture(t);
   const created = await createCheckoutSession(browserManualInput(draft())), row = sessions.get(created.id)!;
   row.status = 'succeeded'; row.gateway_transaction_id = 'mock-payment';
   const view = publicSession(row), receipt = view.receipt!;
-  assert.equal(receipt.amount, '99.00'); assert.equal(receipt.currency, 'USD');
+  assert.equal(receipt.amount, '2623.50'); assert.equal(receipt.currency, 'HNL');
   assert.deepEqual(receipt.priceReference, view.priceReference);
-  assert.ok(chargeDisclosure(view.amount, view.currency, view.priceReference, 'es').includes('tarjeta: $ 99.00 USD. Equivalente informativo: L 2623.50 HNL.'));
-  assert.ok(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'es', true).includes('Cobro realizado: $ 99.00 USD.'));
-  assert.ok(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'en', true).includes('Amount charged: $ 99.00 USD.'));
+  assert.ok(chargeDisclosure(view.amount, view.currency, view.priceReference, 'es').includes('tarjeta: L 2623.50 HNL. Precio de referencia: $ 99.00 USD.'));
+  assert.ok(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'es', true).includes('Cobro realizado: L 2623.50 HNL.'));
+  assert.ok(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'en', true).includes('Amount charged: L 2623.50 HNL.'));
 });

@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     assertSameOrigin(req);
     const session = await authenticatedSession();
     if (!['open', 'declined'].includes(session.status) || needsLegacyPaymentReview(session)) return NextResponse.json({ session: publicSession(session) });
-    if (session.currency !== 'USD') return NextResponse.json({ error: 'SESSION_CURRENCY_CHANGED' }, { status: 409 });
+    if (session.currency !== 'HNL') return NextResponse.json({ error: 'SESSION_CURRENCY_CHANGED' }, { status: 409 });
     const body = paymentRequestSchema.safeParse(await req.json());
     if (!body.success || !session.capture_context) return NextResponse.json({ error: 'INVALID_PAYMENT_DATA' }, { status: 400 });
     const data = body.data;

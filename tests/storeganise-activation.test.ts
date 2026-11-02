@@ -186,15 +186,15 @@ test('unknown steps are not skipped and an unconfirmed assignment never shows ac
   await assert.rejects(completePaidMoveIn(f.session), /IDENTITY_MISMATCH/);
 });
 
-test('production USD payment registers once, records the HNL equivalent and completes occupancy', async t => {
+test('production HNL payment registers the USD invoice balance once and completes occupancy', async t => {
   const f = fixture(t); process.env.CYBERSOURCE_ENVIRONMENT = 'production';
   f.session.environment = 'production'; delete f.session.storeganise_context!.sandboxActivation;
-  f.session.currency = 'USD'; f.session.amount = '199.00';
+  f.session.currency = 'HNL'; f.session.amount = '5273.50';
   await f.approve(); await syncStoreganiseSession(f.session.id);
   assert.equal(f.session.storeganise_status, 'active'); assert.doesNotMatch(f.state.payments[0].notes, /SANDBOX/);
   assert.equal(f.state.payments[0].amount, 199);
-  assert.match(f.state.payments[0].notes, /Cobro: USD 199.00/);
-  assert.match(f.state.payments[0].notes, /Equivalente informativo: HNL 5273.50/);
+  assert.match(f.state.payments[0].notes, /Cobro: HNL 5273.50/);
+  assert.match(f.state.payments[0].notes, /Importe original: USD 199.00/);
   await syncStoreganiseSession(f.session.id);
   assert.equal(f.state.payments.length, 1);
 });

@@ -1,10 +1,10 @@
 ﻿# Pay Roatan Self Storage
 
-Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Los pagos nuevos se envían en USD; la tasa BCH muestra el equivalente informativo en HNL. Guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
+Carrusel de pago con tarjeta mediante CyberSource Microform y 3D Secure. Los precios se ingresan en USD y los pagos nuevos se envían en lempiras (HNL), usando la tasa BCH fijada en cada sesión. Guarda cliente, factura, bodega, cotización e intento en PostgreSQL.
 
-Actualización del código: 2 de noviembre de 2026. La API bancaria admite únicamente producción. La entrada directa a Pay permite crear un pago manual en USD con nombre y referencia opcional; Storeganise conserva su acceso autenticado con el saldo verificado por el servidor. Ver [pagos manuales, moneda y despliegue](PAGOS_MANUALES_USD.md). La documentación de sandbox anterior se conserva como antecedente y no habilita ese entorno.
+Actualización del código: 2 de noviembre de 2026. La API bancaria admite únicamente producción. La entrada directa a Pay permite crear un pago manual con precio en USD, nombre y referencia opcional; antes de pagar muestra el cobro convertido a HNL. Storeganise conserva su acceso autenticado con el saldo verificado por el servidor. Ver [pagos manuales, moneda y despliegue](PAGOS_MANUALES_USD.md). La documentación de sandbox anterior se conserva como antecedente y no habilita ese entorno.
 
-Las pruebas del cambio usan proveedores y base de datos simulados, sin transacciones bancarias ni escrituras en cuentas externas. La aceptación de las credenciales y de USD por BAC debe verificarse con la operación manual del comercio.
+Las pruebas del cambio usan proveedores y base de datos simulados, sin transacciones bancarias ni escrituras en cuentas externas. Verifican el envío en HNL y la conversión; no certifican la aceptación bancaria de las credenciales de producción.
 
 ## Integración incorporada
 
@@ -29,7 +29,7 @@ El enlace firmado permite abrir el carrusel sin volver a pedir la contraseña. P
 - [PRUEBAS_MANUALES_SANDBOX.md](PRUEBAS_MANUALES_SANDBOX.md): uso del formulario manual existente.
 - [CONFIGURACION_BCH.md](CONFIGURACION_BCH.md): conversión USD a HNL.
 
-Las variables privadas no se suben a GitHub. El cambio de código no modifica `.env.local` ni las variables guardadas en Vercel. Para pruebas, guardar la configuración sandbox indicada y redesplegar; para pagos reales se necesitan el entorno y las credenciales de producción.
+Las variables privadas no se suben a GitHub. El cambio de código no modifica `.env.local` ni las variables guardadas en Vercel. El flujo publicado requiere el entorno y las credenciales de producción; las pruebas de código usan proveedores simulados.
 
 Los informes RESULTADOS_* y PRUEBAS_* conservan evidencia de etapas anteriores y no certifican esta actualización.
 

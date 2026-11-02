@@ -6,7 +6,6 @@ import { merchantCustomerReference } from './customer-reference';
 import { gatewayEnvironment, gatewayEndpoints, type GatewayEnvironment } from './environment';
 import type { AuthenticationCheckInput, AuthenticationResult, AuthenticationSetup, BillTo, BrowserDevice, CaptureContextResult, PaymentResult, VerifiedTransientToken } from './types';
 
-export const SANDBOX_ORIGIN = 'https://apitest.cybersource.com';
 type Json = Record<string, any>;
 
 export class GatewayError extends Error {

@@ -1,6 +1,6 @@
 # Precios en USD y cobros en lempiras
 
-Actualización del 2 de noviembre de 2026.
+Actualización del 4 de noviembre de 2026. Las nuevas cotizaciones usan la tasa de venta del BCH, indicador 620 (`EC-TCN-01-2`), sin agregar otro margen. La pantalla y el comprobante identifican el tipo de tasa aplicado; las cotizaciones existentes conservan la tasa que ya tenían guardada. Ver [fuente y configuración](CONFIGURACION_BCH.md).
 
 La entrada directa al dominio de Pay permite escribir nombre, referencia opcional y un precio positivo en USD. Continuar crea una sesión pendiente con el monto convertido a HNL y muestra los campos seguros de tarjeta y los datos reales de facturación. El cobro se solicita solo al pulsar pagar y completar la verificación bancaria requerida.
 

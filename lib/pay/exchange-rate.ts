@@ -5,11 +5,11 @@ import { bchApiKey, fetchBchRate, isCurrentBchRate, type BchRate } from './bch';
 export async function currentBchRate(): Promise<BchRate> {
   bchApiKey();
   return transaction(async client => {
-    await client.query('SELECT pg_advisory_xact_lock(741906, 97)');
-    const saved = await client.query<{ rate: BchRate }>("SELECT rate FROM pay_exchange_rates WHERE source='BCH-TCR-97'");
+    await client.query('SELECT pg_advisory_xact_lock(741906, 620)');
+    const saved = await client.query<{ rate: BchRate }>("SELECT rate FROM pay_exchange_rates WHERE source='BCH-SELL-620'");
     if (saved.rows[0] && isCurrentBchRate(saved.rows[0].rate)) return saved.rows[0].rate;
     const rate = await fetchBchRate();
-    await client.query("INSERT INTO pay_exchange_rates(source,rate) VALUES('BCH-TCR-97',$1) ON CONFLICT(source) DO UPDATE SET rate=EXCLUDED.rate", [JSON.stringify(rate)]);
+    await client.query("INSERT INTO pay_exchange_rates(source,rate) VALUES('BCH-SELL-620',$1) ON CONFLICT(source) DO UPDATE SET rate=EXCLUDED.rate", [JSON.stringify(rate)]);
     return rate;
   });
 }

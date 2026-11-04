@@ -89,8 +89,8 @@ export async function openStoreganiseCheckout(value: unknown) {
           if(!rate)throw new StoreganiseIntegrationError('EXCHANGE_RATE_UNAVAILABLE',503);
           const renewed = await client.query<SessionRow>(`UPDATE pay_sessions SET reference_usd_amount=$2,amount=$3,currency='HNL',
             usd_hnl_rate=$4,fx_source='BCH',fx_rate_date=$5,fx_fetched_at=$6,expires_at=now()+interval '30 minutes',
-            capture_context=NULL,updated_at=now() WHERE id=$1 RETURNING *`,
-          [session.id,amount,hnlCharge(amount,rate.hnlPerUsd),rate.hnlPerUsd,rate.rateDate,rate.fetchedAt]);
+            capture_context=NULL,fx_indicator_id=$7,updated_at=now() WHERE id=$1 RETURNING *`,
+          [session.id,amount,hnlCharge(amount,rate.hnlPerUsd),rate.hnlPerUsd,rate.rateDate,rate.fetchedAt,rate.indicatorId]);
           session = renewed.rows[0];
         }
       }

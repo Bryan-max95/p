@@ -7,6 +7,7 @@ import type { BillTo } from '@/lib/cybersource/types';
 export interface PriceReference {
   amount: string; currency: 'USD'; hnlPerUsd: string; hnlAmount?: string;
   source?: 'BCH'; rateDate?: string | null; fetchedAt?: string;
+  indicatorId?: number; rateType?: 'sell' | 'buy';
 }
 
 export interface PaymentReceipt {

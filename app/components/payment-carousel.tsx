@@ -675,7 +675,7 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                   </div>
 
                   {manualEntry && <p className="text-xs text-slate-600">{manualEnabled
-                    ? (lang === 'es' ? 'Ingrese el precio en USD. El cobro se enviará en lempiras (HNL) con la tasa BCH; podrá revisar el total antes de pagar.' : 'Enter the USD price. The charge will be sent in lempiras (HNL) using the BCH rate; review the total before paying.')
+                    ? (lang === 'es' ? 'Ingrese el precio en USD. El cobro se enviará en lempiras (HNL) con la tasa de venta del BCH; podrá revisar el total antes de pagar.' : 'Enter the USD price. The charge will be sent in lempiras (HNL) using the BCH selling rate; review the total before paying.')
                     : (lang === 'es' ? 'El pago manual no está disponible. Abra su pago desde Storeganise.' : 'Manual payment is unavailable. Open your payment from Storeganise.')}</p>}
                   {payment.preparingManual && <p role="status" className="text-xs text-slate-600">{lang === 'es' ? 'Preparando los campos de tarjeta…' : 'Preparing the card fields…'}</p>}
                   {payment.manualError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-xs text-red-700">{payment.manualError === 'EXCHANGE_RATE_UNAVAILABLE'

@@ -29,6 +29,7 @@ export interface SessionRow {
   status: string; portal_status: string;
   reference_usd_amount?: string | null; usd_hnl_rate?: string | null;
   fx_source?: string | null; fx_rate_date?: string | null; fx_fetched_at?: Date | null;
+  fx_indicator_id?: number | null;
   is_demo: boolean; capture_context?: string;
   gateway_transaction_id?: string; authorization_code?: string; card_brand?: string; card_last4?: string;
   gateway_status?: string; failure_reason?: string; consumed_at?:Date; expires_at: Date; paid_at?: Date; created_at: Date;

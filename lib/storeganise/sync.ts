@@ -7,6 +7,7 @@ import { storeganiseRequest, StoreganiseApiError } from './client';
 import { storeganisePaymentWritesAllowed } from './payment-policy';
 import { bindPaidReservation, completePaidMoveIn } from './paid-booking';
 import { hnlCharge } from '../pay/exchange-rate';
+import { BCH_INDICATOR_ID } from '../pay/bch';
 
 interface Delivery {
   session_id: string; transaction_id: string; attempt_count: number;
@@ -99,9 +100,10 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
       if (!writing.rowCount) return;
       delivery.payment_write_started = true;
       const bankAmount = Number(session.amount).toFixed(2);
+      const rateName = session.fx_indicator_id === BCH_INDICATOR_ID ? 'BCH venta' : 'BCH compra (TCR)';
       const conversion = session.currency === 'USD'
-        ? `Equivalente informativo: HNL ${hnlCharge(amount, session.usd_hnl_rate!)}; BCH ${session.usd_hnl_rate} (${session.fx_rate_date}).`
-        : `Importe original: USD ${amount}; BCH ${session.usd_hnl_rate} (${session.fx_rate_date}).`;
+        ? `Equivalente informativo: HNL ${hnlCharge(amount, session.usd_hnl_rate!)}; ${rateName} ${session.usd_hnl_rate} (${session.fx_rate_date}).`
+        : `Importe original: USD ${amount}; ${rateName} ${session.usd_hnl_rate} (${session.fx_rate_date}).`;
       const notes = `${marker}\n${session.environment === 'sandbox' ? 'SANDBOX: transaccion de prueba, sin ingreso bancario. Activacion solicitada por el operador.\n' : ''}Reference: RSS-${session.id}\nCobro: ${session.currency} ${bankAmount}. ${conversion}`;
       // Same manual payment operation used by Storeganise's Management Portal.
       // "manual" means an externally collected payment; the displayed method is card.

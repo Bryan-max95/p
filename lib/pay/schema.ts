@@ -18,6 +18,7 @@ ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS capture_context text;
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS reference_usd_amount numeric(14,2);
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS usd_hnl_rate numeric(14,6);
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS fx_source text;
+ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS fx_indicator_id integer;
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS fx_rate_date text;
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS fx_fetched_at timestamptz;
 ALTER TABLE pay_sessions ADD COLUMN IF NOT EXISTS checkout_source text NOT NULL DEFAULT 'storeganise' CHECK (checkout_source IN ('manual','storeganise'));

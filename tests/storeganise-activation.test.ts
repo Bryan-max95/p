@@ -189,12 +189,14 @@ test('unknown steps are not skipped and an unconfirmed assignment never shows ac
 test('production HNL payment registers the USD invoice balance once and completes occupancy', async t => {
   const f = fixture(t); process.env.CYBERSOURCE_ENVIRONMENT = 'production';
   f.session.environment = 'production'; delete f.session.storeganise_context!.sandboxActivation;
-  f.session.currency = 'HNL'; f.session.amount = '5273.50';
+  f.session.currency = 'HNL'; f.session.amount = '5381.44';
+  f.session.usd_hnl_rate = '27.042400'; f.session.fx_indicator_id = 620;
   await f.approve(); await syncStoreganiseSession(f.session.id);
   assert.equal(f.session.storeganise_status, 'active'); assert.doesNotMatch(f.state.payments[0].notes, /SANDBOX/);
   assert.equal(f.state.payments[0].amount, 199);
-  assert.match(f.state.payments[0].notes, /Cobro: HNL 5273.50/);
+  assert.match(f.state.payments[0].notes, /Cobro: HNL 5381\.44/);
   assert.match(f.state.payments[0].notes, /Importe original: USD 199.00/);
+  assert.match(f.state.payments[0].notes, /BCH venta 27\.042400/);
   await syncStoreganiseSession(f.session.id);
   assert.equal(f.state.payments.length, 1);
 });

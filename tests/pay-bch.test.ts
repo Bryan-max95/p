@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { BCH_RATE_URL, fetchBchRate, isCurrentBchRate, parseBchRate, ExchangeRateError } from '../lib/pay/bch';
 
 const now = new Date('2026-10-09T15:00:00Z');
-const point = (date: string, value: unknown = 26.5) => ({ IndicadorId: 97, Nombre: 'EC-TCR-01', Fecha: `${date}T00:00:00Z`, Valor: value });
+const point = (date: string, value: unknown = 26.5) => ({ IndicadorId: 620, Nombre: 'EC-TCN-01-2', Fecha: `${date}T00:00:00Z`, Valor: value });
 
 test('latest published applicable BCH observation wins regardless of order', () => {
   const rate = parseBchRate([point('2026-10-08'), point('2026-10-10', 27), point('2026-10-09', 26.6), point('2026-10-07')], now);
-  assert.deepEqual(rate, { source: 'BCH', hnlPerUsd: '26.600000', rateDate: '2026-10-09', fetchedAt: now.toISOString() });
+  assert.deepEqual(rate, { source: 'BCH', indicatorId: 620, hnlPerUsd: '26.600000', rateDate: '2026-10-09', fetchedAt: now.toISOString() });
   assert.equal(isCurrentBchRate(rate, now), true);
   assert.equal(isCurrentBchRate(rate, new Date(now.getTime() + 3600000)), false, 'Refresh after one hour');
   assert.equal(isCurrentBchRate(rate, new Date(now.getTime() - 1)), false, 'No future cache timestamps');
@@ -23,10 +23,11 @@ test('Honduras calendar controls applicability, with bounded weekend/holiday tol
 });
 
 test('live BCH dates without timezone and duplicate observations preserve the publication day', () => {
-  const actual = { IndicadorId: 97, Nombre: 'EC-TCR-01', Fecha: '2026-10-07T00:00:00', Valor: 26.8883 };
-  for (const date of ['2026-10-07T00:00:00', '2026-10-07T00:00:00.000', '2026-10-07T00:00:00Z']) {
-    const rate = parseBchRate([{ ...actual, Fecha: date }, actual], now);
-    assert.equal(rate.rateDate, '2026-10-07'); assert.equal(rate.hnlPerUsd, '26.888300');
+  const actual = { IndicadorId: 620, Nombre: 'EC-TCN-01-2', Fecha: '2026-11-04T00:00:00', Valor: 27.0424 };
+  const fetched = new Date('2026-11-04T15:00:00Z');
+  for (const date of ['2026-11-04T00:00:00', '2026-11-04T00:00:00.000', '2026-11-04T00:00:00Z']) {
+    const rate = parseBchRate([{ ...actual, Fecha: date }, actual], fetched);
+    assert.equal(rate.rateDate, '2026-11-04'); assert.equal(rate.hnlPerUsd, '27.042400');
   }
   for (const date of ['2026-02-30T00:00:00', '2026-10-07T12:00:00', '2026-10-07T00:00:00+06:00']) {
     assert.throws(() => parseBchRate([{ ...actual, Fecha: date }], now), /BCH_INVALID_RESPONSE/);
@@ -35,7 +36,8 @@ test('live BCH dates without timezone and duplicate observations preserve the pu
 
 test('invalid data, wrong series, conflicting rates and pagination envelopes fail closed', () => {
   for (const data of [null, {}, [], { data: [point('2026-10-09')] },
-    [{ ...point('2026-10-09'), IndicadorId: 98 }], [{ ...point('2026-10-09'), Nombre: 'OTHER' }],
+    [{ ...point('2026-10-09'), IndicadorId: 97, Nombre: 'EC-TCR-01' }],
+    [{ ...point('2026-10-09'), IndicadorId: 619 }], [{ ...point('2026-10-09'), Nombre: 'OTHER' }],
     [point('2026-02-30')], [point('2026-10-09', null)], [point('2026-10-09', 0)],
     [point('2026-10-09', '26,5')], [point('2026-10-09', '26.1234567')],
     [point('2026-10-09', 26), point('2026-10-09', 27)]]) assert.throws(() => parseBchRate(data, now), ExchangeRateError);
@@ -75,16 +77,39 @@ test('configured URL and indicator cannot redirect the subscription key or selec
   t.after(() => {
     for (const [name, value] of Object.entries(saved)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   });
-  Object.assign(process.env, { BCH_API_KEY: 'private-test-key', BCH_API_URL: BCH_RATE_URL, BCH_INDICADOR_ID: '97' });
+  Object.assign(process.env, { BCH_API_KEY: 'private-test-key', BCH_API_URL: BCH_RATE_URL, BCH_INDICADOR_ID: '620' });
   const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response('', { status: 401 }));
   await assert.rejects(fetchBchRate(), /BCH_UNAUTHORIZED/);
   assert.equal(fetchMock.mock.callCount(), 1, 'Configured official endpoint is used');
-  for (const url of ['https://example.com/api/v1/indicadores/97/cifras', BCH_RATE_URL + '?subscription-key=test', BCH_RATE_URL.replace('/97/', '/98/')]) {
+  for (const url of ['https://example.com/api/v1/indicadores/620/cifras', BCH_RATE_URL + '?subscription-key=test', BCH_RATE_URL.replace('/620/', '/619/')]) {
     process.env.BCH_API_URL = url;
     await assert.rejects(fetchBchRate(), /BCH_INVALID_CONFIGURATION/);
   }
   process.env.BCH_API_URL = BCH_RATE_URL;
-  process.env.BCH_INDICADOR_ID = '98';
+  process.env.BCH_INDICADOR_ID = '619';
   await assert.rejects(fetchBchRate(), /BCH_INVALID_CONFIGURATION/);
   assert.equal(fetchMock.mock.callCount(), 1);
+});
+
+test('buying quotes cannot be reused as the current selling cache', () => {
+  const rate = parseBchRate([point('2026-10-09')], now);
+  for (const indicatorId of [undefined, 97, 619]) {
+    assert.equal(isCurrentBchRate({ ...rate, indicatorId } as typeof rate, now), false);
+  }
+});
+
+test('legacy deployment settings still fetch only the official selling series without a buying fallback', async t => {
+  const values = { BCH_API_KEY: 'private-test-key', BCH_API_URL: 'https://bchapi-am.azure-api.net/api/v1/indicadores/97/cifras', BCH_INDICADOR_ID: '97' };
+  const old = Object.fromEntries(Object.keys(values).map(name => [name, process.env[name]]));
+  Object.assign(process.env, values);
+  t.after(() => { for (const [name, value] of Object.entries(old)) { if (value === undefined) delete process.env[name]; else process.env[name] = value; } });
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Tegucigalpa' }).format(new Date());
+  const mock = t.mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
+    assert.equal(url, 'https://bchapi-am.azure-api.net/api/v1/indicadores/620/cifras');
+    return new Response(JSON.stringify([point(today, 27.0424)]));
+  });
+  assert.equal((await fetchBchRate()).hnlPerUsd, '27.042400');
+  mock.mock.mockImplementation(async () => new Response(JSON.stringify([{ ...point(today), IndicadorId: 97, Nombre: 'EC-TCR-01' }])));
+  await assert.rejects(fetchBchRate(), /BCH_INVALID_RESPONSE/);
+  assert.equal(mock.mock.callCount(), 2);
 });

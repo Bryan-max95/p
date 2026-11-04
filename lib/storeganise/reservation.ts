@@ -145,9 +145,9 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
           session.unit_id !== selectionId || existingBinding.unitTypeId !== order.unitTypeId) {
           const renewed = await client.query<SessionRow>(`UPDATE pay_sessions SET reference_usd_amount=$2,amount=$3,currency='HNL',
             usd_hnl_rate=$4,fx_rate_date=$5,fx_fetched_at=$6,expires_at=now()+interval '30 minutes',
-            capture_context=NULL,unit_id=$7,unit_name=$8,storeganise_context=$9,updated_at=now() WHERE id=$1 RETURNING *`,
+            capture_context=NULL,unit_id=$7,unit_name=$8,storeganise_context=$9,fx_indicator_id=$10,updated_at=now() WHERE id=$1 RETURNING *`,
           [session.id, amount, hnlCharge(amount, rate.hnlPerUsd), rate.hnlPerUsd, rate.rateDate, rate.fetchedAt,
-            selectionId, unitName, JSON.stringify(binding)]);
+            selectionId, unitName, JSON.stringify(binding),rate.indicatorId]);
           session = renewed.rows[0];
         }
         // Replace the legacy cookie dependency only after a verified handoff,

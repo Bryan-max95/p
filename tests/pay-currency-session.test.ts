@@ -24,8 +24,11 @@ function fixture(t: TestContext) {
   const state = { cache: undefined as BchRate | undefined, inserts: 0, attempts: 0, requests: 0, rate: 26.5, unavailable: false };
   const runQuery = async (sql: string, values: unknown[] = []) => {
     let rows: unknown[] = [];
-    if (sql.startsWith('SELECT rate FROM pay_exchange_rates')) rows = state.cache ? [{ rate: state.cache }] : [];
-    else if (sql.startsWith('INSERT INTO pay_exchange_rates')) state.cache = JSON.parse(String(values[0]));
+    if (sql.startsWith('SELECT rate FROM pay_exchange_rates')) {
+      assert.ok(sql.includes("source='BCH-SELL-620'")); rows = state.cache ? [{ rate: state.cache }] : [];
+    } else if (sql.startsWith('INSERT INTO pay_exchange_rates')) {
+      assert.ok(sql.includes("'BCH-SELL-620'")); state.cache = JSON.parse(String(values[0]));
+    }
     else if (sql.startsWith('SELECT * FROM pay_sessions WHERE event_id=')) rows = [...sessions.values()].filter(s => s.event_id === values[0]);
     else if (sql.startsWith('SELECT * FROM pay_sessions WHERE id=')) rows = [...sessions.values()].filter(s => s.id === values[0]);
     else if (sql.startsWith('INSERT INTO pay_sessions')) {
@@ -36,7 +39,7 @@ function fixture(t: TestContext) {
           customer_id: String(values[3]), order_id: values[4], invoice_id: values[5], unit_id: String(values[6]),
           client_name: String(values[7]), unit_name: String(values[8]), concept: String(values[9]), currency: String(values[10]),
           amount: String(values[11]), bill_to: JSON.parse(String(values[12])), return_url: values[13], is_demo: values[14],
-          portal_status: values[15], reference_usd_amount: values[16], usd_hnl_rate: values[17], fx_source: values[18],
+          portal_status: values[15], reference_usd_amount: values[16], usd_hnl_rate: values[17], fx_source: values[18], fx_indicator_id: values[25],
           fx_rate_date: values[19], fx_fetched_at: values[20] ? new Date(String(values[20])) : null,
           storeganise_context: values[23] ? JSON.parse(String(values[23])) : null, storeganise_status: String(values[24]),
           status: 'open', environment: values[21], checkout_source: values[22], created_at: new Date(), expires_at: new Date(Date.now() + 1800000) } as SessionRow;
@@ -62,10 +65,11 @@ function fixture(t: TestContext) {
   t.mock.method(pool, 'connect', async () => ({ query: runQuery, release() {} }));
   t.mock.method(globalThis, 'fetch', async (url: string | URL | Request) => {
     assert.equal(new URL(String(url)).hostname, 'bchapi-am.azure-api.net');
+    assert.equal(new URL(String(url)).pathname, '/api/v1/indicadores/620/cifras');
     state.requests++;
     if (state.unavailable) return new Response('unavailable', { status: 503 });
     const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Tegucigalpa' }).format(new Date());
-    return new Response(JSON.stringify([{ IndicadorId: 97, Fecha: `${date}T00:00:00Z`, Valor: state.rate }]));
+    return new Response(JSON.stringify([{ IndicadorId: 620, Nombre: 'EC-TCN-01-2', Fecha: `${date}T00:00:00Z`, Valor: state.rate }]));
   });
   t.after(async () => {
     await closeDatabase();
@@ -108,11 +112,13 @@ test('manual preparation creates an HNL session without payment and requires act
   const created = await createCheckoutSession(browserManualInput(draft())), row = sessions.get(created.id)!;
   assert.equal(row.currency, 'HNL'); assert.equal(row.amount, '2623.50');
   assert.equal(row.reference_usd_amount, '99.00'); assert.equal(row.usd_hnl_rate, '26.500000');
+  assert.equal(row.fx_indicator_id, 620);
   assert.equal(row.storeganise_context, null); assert.equal(row.storeganise_status, 'disabled');
   assert.equal(row.portal_status, 'disabled'); assert.equal(state.attempts, 0);
   const view = publicSession(row);
   assert.equal(view.billingRequired, true); assert.equal(view.storeganise, undefined);
   assert.equal(view.priceReference?.hnlAmount, '2623.50');
+  assert.equal(view.priceReference?.rateType, 'sell');
   await assert.rejects(beginAttempt(row.id), /email|address1|country/);
   assert.equal(state.attempts, 0);
   const attempt = await beginAttempt(row.id, 'fake-token', 'payment', billTo);
@@ -224,4 +230,28 @@ test('checkout and receipt state the HNL charge and USD reference price', async 
   assert.ok(chargeDisclosure(view.amount, view.currency, view.priceReference, 'es').includes('tarjeta: L 2623.50 HNL. Precio de referencia: $ 99.00 USD.'));
   assert.ok(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'es', true).includes('Cobro realizado: L 2623.50 HNL.'));
   assert.ok(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'en', true).includes('Amount charged: L 2623.50 HNL.'));
+  assert.match(chargeDisclosure(view.amount, view.currency, view.priceReference, 'es'), /Tipo de cambio de venta: L 26\.5 por USD 1/);
+  assert.match(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'en', true), /Selling exchange rate: L 26\.5/);
+});
+
+test('new checkouts use the published selling value while historical quotes and receipts keep their buying rate', async t => {
+  const { sessions, state } = fixture(t);
+  const input = browserManualInput(draft()), original = await createCheckoutSession(input), old = sessions.get(original.id)!;
+  // Existing persisted quote from before the migration, including in-flight payments.
+  old.fx_indicator_id = null; old.usd_hnl_rate = '26.907900'; old.amount = '2663.88';
+  for (const status of ['open', 'pending', 'unknown', 'succeeded']) {
+    old.status = status;
+    assert.deepEqual(await createCheckoutSession(input), original);
+    assert.equal(old.amount, '2663.88'); assert.equal(old.fx_indicator_id, null);
+  }
+  old.gateway_transaction_id = 'historical-buying-payment';
+  const receipt = publicSession(old).receipt!;
+  assert.equal(receipt.priceReference?.rateType, 'buy'); assert.equal(receipt.priceReference?.indicatorId, 97);
+  assert.match(chargeDisclosure(receipt.amount, receipt.currency, receipt.priceReference, 'es', true), /Tipo de cambio de compra: L 26\.9079/);
+  state.rate = 27.0424; state.cache!.indicatorId = 97 as 620;
+  const created = await createCheckoutSession(browserManualInput(draft())), current = sessions.get(created.id)!;
+  assert.equal(current.usd_hnl_rate, '27.042400'); assert.equal(current.amount, '2677.20');
+  assert.equal(current.reference_usd_amount, '99.00'); assert.equal(current.currency, 'HNL');
+  assert.equal(current.fx_indicator_id, 620); assert.equal(state.requests, 2);
+  assert.equal(state.attempts, 0);
 });

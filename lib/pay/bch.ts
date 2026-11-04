@@ -1,10 +1,12 @@
-/** Official BCH TCR series; never called by the browser. */
-export const BCH_RATE_URL = 'https://bchapi-am.azure-api.net/api/v1/indicadores/97/cifras';
+/** Official BCH nominal selling rate; never called by the browser. */
+export const BCH_INDICATOR_ID = 620;
+export const BCH_RATE_URL = 'https://bchapi-am.azure-api.net/api/v1/indicadores/620/cifras';
+const LEGACY_BCH_RATE_URL = 'https://bchapi-am.azure-api.net/api/v1/indicadores/97/cifras';
 export const BCH_MAX_AGE_DAYS = 4;
 export const BCH_REFRESH_MS = 60 * 60 * 1000;
 
 export interface BchRate {
-  source: 'BCH'; hnlPerUsd: string; rateDate: string; fetchedAt: string;
+  source: 'BCH'; indicatorId: typeof BCH_INDICATOR_ID; hnlPerUsd: string; rateDate: string; fetchedAt: string;
 }
 
 export class ExchangeRateError extends Error {
@@ -13,7 +15,7 @@ export class ExchangeRateError extends Error {
 
 export function bchApiKey() {
   if (typeof window !== 'undefined') throw new ExchangeRateError('BCH_SERVER_ONLY');
-  // This checkout supports only the official TCR series. Never forward its key to another endpoint.
+  // This checkout uses only the official selling series. Never forward its key elsewhere.
   bchEndpoint();
   const key = process.env.BCH_API_KEY?.trim();
   if (!key || /\s/.test(key) || /^(TU_|YOUR_|CHANGE_ME|<)/i.test(key)) throw new ExchangeRateError('BCH_NOT_CONFIGURED');
@@ -22,9 +24,13 @@ export function bchApiKey() {
 
 function bchEndpoint() {
   const url = process.env.BCH_API_URL?.trim() || BCH_RATE_URL;
-  const indicator = process.env.BCH_INDICADOR_ID?.trim() || '97';
-  if (url !== BCH_RATE_URL || indicator !== '97') throw new ExchangeRateError('BCH_INVALID_CONFIGURATION');
-  return url;
+  const indicator = process.env.BCH_INDICADOR_ID?.trim() || String(BCH_INDICATOR_ID);
+  // Older deployments configured 97 explicitly. Accept only that known legacy
+  // configuration as a migration alias; every request still goes to selling series 620.
+  if (![BCH_RATE_URL, LEGACY_BCH_RATE_URL].includes(url) || !['620', '97'].includes(indicator)) {
+    throw new ExchangeRateError('BCH_INVALID_CONFIGURATION');
+  }
+  return BCH_RATE_URL;
 }
 
 function hondurasDate(now: Date) {
@@ -36,7 +42,7 @@ export function isCurrentBchRate(rate: BchRate, now = new Date()) {
   const today = Date.parse(`${hondurasDate(now)}T00:00:00Z`);
   const date = Date.parse(`${rate.rateDate}T00:00:00Z`);
   const fetched = Date.parse(rate.fetchedAt);
-  return rate.source === 'BCH' && /^\d{1,6}\.\d{6}$/.test(rate.hnlPerUsd) && Number(rate.hnlPerUsd) > 0 &&
+  return rate.source === 'BCH' && rate.indicatorId === BCH_INDICATOR_ID && /^\d{1,6}\.\d{6}$/.test(rate.hnlPerUsd) && Number(rate.hnlPerUsd) > 0 &&
     /^\d{4}-\d{2}-\d{2}$/.test(rate.rateDate) && Number.isFinite(date) && new Date(date).toISOString().slice(0, 10) === rate.rateDate &&
     date <= today && today - date <= BCH_MAX_AGE_DAYS * 86400000 &&
     Number.isFinite(fetched) && fetched <= now.getTime() && now.getTime() - fetched < BCH_REFRESH_MS;
@@ -48,8 +54,8 @@ export function parseBchRate(payload: unknown, now = new Date()): BchRate {
   const today = hondurasDate(now);
   let selected: BchRate | undefined;
   for (const item of payload) {
-    if (!item || typeof item !== 'object' || item.IndicadorId !== 97 ||
-      (item.Nombre !== undefined && item.Nombre !== 'EC-TCR-01') || typeof item.Fecha !== 'string' ||
+    if (!item || typeof item !== 'object' || item.IndicadorId !== BCH_INDICATOR_ID ||
+      (item.Nombre !== undefined && item.Nombre !== 'EC-TCN-01-2') || typeof item.Fecha !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}T00:00:00(?:\.0+)?Z?$/.test(item.Fecha)) throw new ExchangeRateError('BCH_INVALID_RESPONSE');
     const rateDate = item.Fecha.slice(0, 10);
     // Live BCH sends calendar dates without Z; never interpret them in the server's local timezone.
@@ -58,7 +64,7 @@ export function parseBchRate(payload: unknown, now = new Date()): BchRate {
     const value = typeof item.Valor === 'number' || typeof item.Valor === 'string' ? String(item.Valor) : '';
     if (!/^\d{1,6}(\.\d{1,6})?$/.test(value) || Number(value) <= 0) throw new ExchangeRateError('BCH_INVALID_RATE');
     if (rateDate > today) continue;
-    const candidate: BchRate = { source: 'BCH', hnlPerUsd: Number(value).toFixed(6), rateDate, fetchedAt: now.toISOString() };
+    const candidate: BchRate = { source: 'BCH', indicatorId: BCH_INDICATOR_ID, hnlPerUsd: Number(value).toFixed(6), rateDate, fetchedAt: now.toISOString() };
     if (selected && selected.rateDate === rateDate && selected.hnlPerUsd !== candidate.hnlPerUsd) throw new ExchangeRateError('BCH_CONFLICTING_RATES');
     if (!selected || rateDate > selected.rateDate) selected = candidate;
   }

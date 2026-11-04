@@ -67,7 +67,7 @@ function fixture(t: TestContext, customer = owner) {
       if (g.lease_token === values[1]) { g.lease_token = null; g.lease_until = null; }
     } else if (sql.startsWith('SELECT rate FROM pay_exchange_rates')) {
       if (state.rateError) throw state.rateError;
-      rows = [{ rate: { source: 'BCH', indicatorId: 97, hnlPerUsd: '26.500000',
+      rows = [{ rate: { source: 'BCH', indicatorId: 620, hnlPerUsd: '26.500000',
         rateDate: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Tegucigalpa' }).format(new Date()), fetchedAt: new Date().toISOString() } }];
     } else if (sql.startsWith('SELECT * FROM pay_sessions WHERE event_id=')) rows = [...sessions.values()].filter(s => s.event_id === values[0]);
     else if (sql.startsWith('SELECT * FROM pay_sessions WHERE environment=')) rows = [...sessions.values()].filter(s => s.environment === values[0] && (s.invoice_id === values[1] || s.event_id === values[2]));
@@ -87,7 +87,7 @@ function fixture(t: TestContext, customer = owner) {
       const s = { id: String(values[0]), event_id: String(values[1]), customer_id: String(values[3]), order_id: values[4], invoice_id: values[5],
         unit_id: String(values[6]), client_name: String(values[7]), unit_name: String(values[8]), concept: String(values[9]),
         currency: String(values[10]), amount: String(values[11]), bill_to: JSON.parse(String(values[12])), return_url: values[13],
-        is_demo: values[14], reference_usd_amount: values[16], usd_hnl_rate: values[17], fx_source: values[18],
+        is_demo: values[14], reference_usd_amount: values[16], usd_hnl_rate: values[17], fx_source: values[18], fx_indicator_id: values[25],
         fx_rate_date: values[19], fx_fetched_at: new Date(String(values[20])), environment: values[21], checkout_source: values[22],
         storeganise_context: JSON.parse(String(values[23])), storeganise_status: values[24], portal_status: values[15], status: 'open', created_at: new Date(), expires_at: new Date(Date.now() + 1800000),
       } as SessionRow;
@@ -95,9 +95,9 @@ function fixture(t: TestContext, customer = owner) {
     } else if (sql.startsWith('UPDATE pay_sessions SET reference_usd_amount=')) {
       const s = sessions.get(String(values[0]))!;
       Object.assign(s, { reference_usd_amount: values[1], amount: values[2], currency: sql.includes("currency='HNL'") ? 'HNL' : s.currency,
-        usd_hnl_rate: values[3], fx_rate_date: values[4], fx_fetched_at: new Date(String(values[5])),
+        usd_hnl_rate: values[3], fx_rate_date: values[4], fx_fetched_at: new Date(String(values[5])), fx_indicator_id: Number(values.length === 10 ? values[9] : values[6]),
         expires_at: new Date(Date.now() + 1800000), capture_context: undefined });
-      if (values.length > 6) Object.assign(s, { unit_id: values[6], unit_name: values[7], storeganise_context: JSON.parse(String(values[8])) });
+      if (values.length === 10) Object.assign(s, { unit_id: values[6], unit_name: values[7], storeganise_context: JSON.parse(String(values[8])) });
       rows = [s];
     } else if (sql.startsWith('UPDATE pay_sessions SET return_url=')) sessions.get(String(values[0]))!.return_url = String(values[1]);
     else if (sql.startsWith('INSERT INTO pay_launch_links') || sql.startsWith('DELETE FROM pay_launch_links')) { /* no bank action */ }
@@ -337,15 +337,26 @@ test('renewed unpaid Storeganise checkouts move to HNL while pending and paid op
     const created = await open();
     const row = f.sessions.get(created.sessionId)!;
     for (const status of ['pending', 'processing', 'unknown', 'succeeded', 'open', 'declined']) {
-      Object.assign(row, { status, currency: 'USD', amount: '199.00', capture_context: 'old-context' });
+      Object.assign(row, { status, currency: 'USD', amount: '199.00', fx_indicator_id: null, capture_context: 'old-context' });
       const result = await open();
       assert.equal(result.sessionId, created.sessionId);
       const renewable = ['open', 'declined'].includes(status);
       assert.equal(row.currency, renewable ? 'HNL' : 'USD');
       assert.equal(row.amount, renewable ? '5273.50' : '199.00');
       assert.equal(row.capture_context, renewable ? undefined : 'old-context');
+      assert.equal(row.fx_indicator_id, renewable ? 620 : null);
       assert.equal(row.reference_usd_amount, '199.00');
     }
+    // The currency is already HNL: preserve its accepted buying quote until it
+    // expires, then renew with the selling series and persist the new metadata.
+    Object.assign(row, { status: 'open', currency: 'HNL', amount: '5174.00', usd_hnl_rate: '26.000000',
+      fx_indicator_id: null, expires_at: new Date(Date.now() + 1800000) });
+    await open();
+    assert.equal(row.amount, '5174.00'); assert.equal(row.fx_indicator_id, null);
+    row.expires_at = new Date(0);
+    await open();
+    assert.equal(row.amount, '5273.50'); assert.equal(row.fx_indicator_id, 620);
+    assert.equal(row.usd_hnl_rate, '26.500000');
     Object.assign(row, { status: 'declined', currency: 'USD', amount: '199.00', gateway_status: 'HTTP_400', gateway_transaction_id: 'uncertain' });
     await open();
     assert.equal(row.currency, 'USD'); assert.equal(row.amount, '199.00');

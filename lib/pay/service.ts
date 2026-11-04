@@ -12,7 +12,7 @@ import { paymentFailureCode } from './payment-feedback';
 import { billToSchema } from './billing-details';
 import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganiseReturnUrl } from '../storeganise/config';
 import { hasSandboxActivation, isLiveStoreganiseSandbox, storeganisePaymentWritesAllowed } from '../storeganise/payment-policy';
-import type { BchRate } from './bch';
+import { BCH_INDICATOR_ID, type BchRate } from './bch';
 
 const sha = (value: string) => crypto.createHash('sha256').update(value).digest('hex');
 const token = () => crypto.randomBytes(32).toString('base64url');
@@ -68,13 +68,14 @@ export async function createCheckoutSession(input: CheckoutSessionInput, storage
   if (existing.rows[0]) return sessionResult(existing.rows[0]);
   if(storage&&!storage.rate)throw new Error('Exchange quote required before checkout transaction');
   const rate = storage?.rate ?? await currentBchRate();
+  if (rate.indicatorId !== BCH_INDICATOR_ID) throw new Error('BCH selling quote required');
   // Storeganise and manual prices are in USD; charge the exact persisted BCH conversion in HNL.
   const chargeAmount = hnlCharge(input.amount, rate.hnlPerUsd);
   const result = await runQuery<SessionRow>(`INSERT INTO pay_sessions
-    (id,event_id,launch_hash,customer_id,order_id,invoice_id,unit_id,client_name,unit_name,concept,currency,amount,bill_to,environment,return_url,expires_at,is_demo,portal_status,reference_usd_amount,usd_hnl_rate,fx_source,fx_rate_date,fx_fetched_at,checkout_source,storeganise_context,storeganise_status)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$22,$14,now()+interval '30 minutes',$15,$16,$17,$18,$19,$20,$21,$23,$24,$25)
+    (id,event_id,launch_hash,customer_id,order_id,invoice_id,unit_id,client_name,unit_name,concept,currency,amount,bill_to,environment,return_url,expires_at,is_demo,portal_status,reference_usd_amount,usd_hnl_rate,fx_source,fx_rate_date,fx_fetched_at,checkout_source,storeganise_context,storeganise_status,fx_indicator_id)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$22,$14,now()+interval '30 minutes',$15,$16,$17,$18,$19,$20,$21,$23,$24,$25,$26)
     ON CONFLICT(event_id) DO UPDATE SET updated_at=now() RETURNING *`,
-    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',input.amount,rate?.hnlPerUsd??null,rate?.source??null,rate?.rateDate??null,rate?.fetchedAt??null,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled']);
+    [id,input.eventId,sha(launchToken),input.customerId,input.orderId??null,input.invoiceId??null,input.unitId,input.clientName,input.unitName,input.concept,'HNL',chargeAmount,JSON.stringify(input.billTo),input.returnUrl??null,input.isDemo === true,'disabled',input.amount,rate.hnlPerUsd,rate.source,rate.rateDate,rate.fetchedAt,environment,source,binding ? JSON.stringify(binding) : null,liveSandbox && !hasSandboxActivation({environment,storeganise_context:binding}) ? 'sandbox_only' : binding ? 'waiting_payment' : 'disabled',rate.indicatorId]);
   return sessionResult(result.rows[0]);
 }
 
@@ -105,7 +106,8 @@ export function publicSession(row: SessionRow) {
   const priceReference = row.reference_usd_amount != null && row.usd_hnl_rate != null ? {
     amount: Number(row.reference_usd_amount).toFixed(2), currency: 'USD' as const, hnlPerUsd: Number(row.usd_hnl_rate).toFixed(6),
     hnlAmount: hnlCharge(Number(row.reference_usd_amount).toFixed(2), row.usd_hnl_rate),
-    ...(row.fx_source === 'BCH' ? { source: 'BCH' as const, rateDate: row.fx_rate_date, fetchedAt: row.fx_fetched_at?.toISOString() } : {}),
+    ...(row.fx_source === 'BCH' ? { source: 'BCH' as const, rateDate: row.fx_rate_date, fetchedAt: row.fx_fetched_at?.toISOString(),
+      indicatorId: row.fx_indicator_id ?? 97, rateType: row.fx_indicator_id === BCH_INDICATOR_ID ? 'sell' as const : 'buy' as const } : {}),
   } : undefined;
   return { id:row.id,clientName:row.client_name,unitName:row.unit_name,concept:row.concept,currency:row.currency,amount:Number(row.amount).toFixed(2),status,portalStatus:row.portal_status,isDemo:row.is_demo,environment:row.environment,source:row.checkout_source ?? 'storeganise',
     ...(priceReference ? { priceReference } : {}),

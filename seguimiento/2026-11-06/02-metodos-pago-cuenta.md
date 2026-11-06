@@ -41,4 +41,6 @@ El usuario confirmó que pagar una reserva y activar su bodega ya funciona. Auto
 - Sustituir y publicar la etiqueta completa en Google Tag Manager; GitHub no publica GTM.
 - Confirmar despliegue de Vercel y habilitación bancaria de TMS y autorizaciones de importe cero.
 - Verificar con el comercio el registro real, el regreso y visualización en Billing, y el recorrido real de reserva, factura y activación. Los tests simulados no certifican estos pasos.
-- Typecheck, compilación final y lint de archivos modificados pasaron. La subida autorizada se realizará al terminar esta nota; su resultado se registrará después.
+- Typecheck, compilación final y lint de archivos modificados pasaron.
+- Implementación subida correctamente a `origin/main` en el repositorio `Bryan-max95/p`, commit `1ce5f57`. Git confirmó el avance remoto desde `aeba8ca`. Las credenciales y respaldos locales no se incluyeron en el commit.
+- Una consulta pública posterior a la subida devolvió HTTP 404 para `/api/pay/payment-method`. El despliegue nuevo aún no estaba disponible en ese momento; no se declara publicado en producción. Confirmar Vercel antes de probar GTM.

@@ -10,4 +10,3 @@ Por petición del usuario, mantener una bitácora persistente de cada cambio.
 - Distinguir lo comprobado de lo pendiente. No afirmar despliegues, pruebas o cobros que no se hayan realizado.
 - No guardar contraseñas, claves, tokens, datos de tarjetas ni información personal de clientes en las notas.
 - Escribir las notas en español y actualizarlas antes de dar por terminada la tarea.
-

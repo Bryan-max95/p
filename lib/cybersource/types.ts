@@ -14,6 +14,8 @@ export interface VerifiedTransientToken {
   cardType: CardType;
   brand: 'Visa' | 'Mastercard' | 'American Express';
   last4?: string;
+  expirationMonth?: string;
+  expirationYear?: string;
   expiresAt: string;
 }
 

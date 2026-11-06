@@ -8,6 +8,9 @@ export const BRIDGE_TTL_SECONDS = 300;
 export const BRIDGE_MAX_OPEN_ORDERS = 5;
 const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 export const bridgeInput = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('prepare_payment_method'), userId: sgId, siteId: sgId.optional() }).strict(),
+  z.object({ operation: z.literal('redeem_payment_method'), grantId: z.string().uuid(), token,
+    clientNonce: token, siteId: sgId, returnUrl: z.string().url().max(2000) }).strict(),
   z.object({ operation: z.literal('prepare'), userId: sgId, orderId: sgId }).strict(),
   z.object({ operation: z.literal('redeem'), grantId: z.string().uuid(), token,
     clientNonce: token, orderId: sgId, returnUrl: z.string().url().max(2000) }).strict(),

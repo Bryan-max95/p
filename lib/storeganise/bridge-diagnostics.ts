@@ -3,7 +3,7 @@ import { ExchangeRateError } from '../pay/bch';
 import { StoreganiseApiError } from './client';
 import { StoreganiseIntegrationError } from './config';
 
-export type BridgeStage = 'origin' | 'request' | 'rate-limit' | 'prepare' | 'redeem';
+export type BridgeStage = 'origin' | 'request' | 'rate-limit' | 'prepare' | 'redeem' | 'prepare_payment_method' | 'redeem_payment_method';
 type Failure = { code: string; status: number; dependencyCode?: string; dependencyStatus?: number };
 
 // Only fixed codes are logged. Never log error.message, SQL, request bodies,

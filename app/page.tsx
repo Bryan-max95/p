@@ -1,14 +1,17 @@
 import PaymentCarousel from './components/payment-carousel';
 import { manualPaymentEnabled } from '@/lib/pay/browser-manual';
 import ReservationAccess from './components/reservation-access';
+import PaymentMethodCarousel from './components/payment-method-carousel';
 import { legacyStoreganiseEntry, type LegacyStoreganiseEntry, type StoreganiseSearchParams } from '@/lib/storeganise/browser-entry';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PaymentPage({searchParams}:{searchParams:Promise<StoreganiseSearchParams>}) {
+  const params = await searchParams;
+  if (params.flow === 'payment_method') return <PaymentMethodCarousel />;
   let entry:LegacyStoreganiseEntry|undefined;
   try{
-    entry=legacyStoreganiseEntry(await searchParams);
+    entry=legacyStoreganiseEntry(params);
   }catch{
     // A failed Storeganise handoff must not become a manual, unrelated charge.
     return <main className="min-h-screen flex items-center justify-center bg-slate-50 px-6">

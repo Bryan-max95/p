@@ -5,6 +5,7 @@ import { isStoreganiseCustomerOrigin } from '@/lib/storeganise/customer-origins'
 import { StoreganiseIntegrationError } from '@/lib/storeganise/config';
 import { bridgeInput } from '@/lib/storeganise/bridge-protocol';
 import { limitBridgeRequests, prepareProfileBridge, redeemProfileBridge } from '@/lib/storeganise/bridge';
+import { prepareMethodBridge, redeemMethodBridge } from '@/lib/storeganise/payment-method-bridge';
 import { describeBridgeFailure, type BridgeStage } from '@/lib/storeganise/bridge-diagnostics';
 
 export const runtime = 'nodejs';
@@ -55,7 +56,10 @@ export async function POST(req: NextRequest) {
     stage = 'rate-limit';
     await limitBridgeRequests(ip);
     stage = input.operation;
-    const result = input.operation === 'prepare' ? await prepareProfileBridge(input) : await redeemProfileBridge(input, origin);
+    const result = input.operation === 'prepare' ? await prepareProfileBridge(input)
+      : input.operation === 'redeem' ? await redeemProfileBridge(input, origin)
+      : input.operation === 'prepare_payment_method' ? await prepareMethodBridge(input)
+      : await redeemMethodBridge(input, origin);
     return NextResponse.json(result, { headers });
   } catch (error) {
     const failure = describeBridgeFailure(error, stage);

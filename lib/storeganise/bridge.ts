@@ -72,7 +72,17 @@ export async function prepareProfileBridge(input: Extract<z.infer<typeof bridgeI
     }));
     // A partial customFields update preserves the customer's other fields.
     // This is the sole Storeganise write made by the bridge. No order is submitted.
-    const delivery = JSON.stringify({ version: 1, grants });
+    // Keep an account-card grant when a reservation opens in another tab.
+    const freshUser = await getUser(user.id);
+    let methodGrants: unknown[] = [];
+    try {
+      const profile = JSON.parse(String(freshUser.customFields?.[BRIDGE_FIELD] ?? '{}'));
+      if (profile.version === 1 && Array.isArray(profile.grants)) {
+        methodGrants = profile.grants.filter((g: { purpose?: string; expiresAt?: string }) =>
+          g && g.purpose === 'payment_method' && typeof g.expiresAt === 'string' && Date.parse(g.expiresAt) > Date.now());
+      }
+    } catch { /* No prior account-card grant. */ }
+    const delivery = JSON.stringify({ version: 1, grants: [...grants, ...methodGrants] });
     if (user.customFields?.[BRIDGE_FIELD] !== delivery) {
       await storeganiseRequest(`/users/${user.id}`, 'PUT', { customFields: { [BRIDGE_FIELD]: delivery } });
     }

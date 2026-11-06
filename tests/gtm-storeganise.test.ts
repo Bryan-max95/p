@@ -11,9 +11,9 @@ const grant = { id: '11ef3b3c-d740-4c81-aad0-0fa520de063e', orderId, token: 'a'.
 
 /** Minimal browser harness executes the actual tag. It mocks network and DOM,
  * not the tag's parsing or navigation decisions; it starts no application. */
-function browser(options: { origin?: string; step?: string; failureStatus?: number; changedUser?: boolean; unsafeDestination?: boolean } = {}) {
+function browser(options: { origin?: string; step?: string; failureStatus?: number; changedUser?: boolean; unsafeDestination?: boolean; v9?: boolean; account?: boolean } = {}) {
   const origin = options.origin ?? 'https://booking.roatanselfstorage.com';
-  const href = `${origin}/sites/roatan/h-medium?orderId=${orderId}&step=${options.step ?? 'billing'}`;
+  const href = options.account ? `${origin}/account/billing` : `${origin}/sites/roatan/h-medium?orderId=${orderId}&step=${options.step ?? 'billing'}`;
   const listeners = new Map<string, (event: unknown) => void>();
   const elements = new Map<string, Element>();
   class Element {
@@ -46,18 +46,19 @@ function browser(options: { origin?: string; step?: string; failureStatus?: numb
       if (url === `${origin}/api/v1/user?include=customFields`) {
         userReads++;
         return Response.json({ id: options.changedUser && userReads === 2 ? '100000000000000000000002' : userId,
-          customFields: userReads === 2 ? { pay_checkout_bridge: JSON.stringify({ version: 1, grants: [grant] }) } : {} });
+          customFields: userReads === 2 ? { pay_checkout_bridge: JSON.stringify({ version: 1, grants: [options.account
+            ? { ...grant, orderId: undefined, purpose: 'payment_method', siteId: '300000000000000000000001' } : grant] }) } : {} });
       }
       assert.equal(url, `${pay}/api/storeganise/bridge`, 'No native billing/custom call');
-      if (payload.operation === 'prepare') return Response.json({ prepared: true });
-      assert.equal(payload.operation, 'redeem');
-      return Response.json({ url: `${options.unsafeDestination ? 'https://evil.example' : pay}/?session=${'b'.repeat(43)}` });
+      if (payload.operation === 'prepare' || payload.operation === 'prepare_payment_method') return Response.json({ prepared: true });
+      assert.equal(payload.operation, options.account ? 'redeem_payment_method' : 'redeem');
+      return Response.json({ url: `${options.unsafeDestination ? 'https://evil.example' : pay}/?session=${'b'.repeat(43)}${options.account ? '&flow=payment_method' : ''}` });
     },
   });
-  vm.runInContext(source, context);
+  vm.runInContext(options.v9 ? fs.readFileSync('examples/gtm-storeganise-pago-v9.html', 'utf8').replace(/^<script>\s*/, '').replace(/\s*<\/script>\s*$/, '') : source, context);
   let prevented = 0;
   const button = { disabled: false, textContent: 'Add payment method',
-    getAttribute: (name: string) => name === 'href' ? `/api/v1/billing/custom?orderId=${orderId}` : null };
+    getAttribute: (name: string) => name === 'href' ? options.account ? '/api/v1/billing/custom' : `/api/v1/billing/custom?orderId=${orderId}` : null };
   const click = () => listeners.get('click')?.({ button: 0, target: { nodeType: 1, closest: () => button },
     preventDefault() { prevented++; }, stopImmediatePropagation() {} });
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise<void>(resolve => setImmediate(resolve)); };
@@ -106,3 +107,29 @@ for (const status of [401, 403, 404, 429]) {
     assert.equal(b.requests.length, 1, 'Cooldown also prevents an immediate manual retry');
   });
 }
+
+test('V9 account add-card opens the secure carousel without a site hint or order', async () => {
+  const b = browser({ v9: true, account: true }); b.click(); await b.settle();
+  assert.equal(b.requests.length, 4);
+  assert.deepEqual(b.requests[1].payload, { operation: 'prepare_payment_method', userId });
+  assert.equal(b.requests[3].payload?.operation, 'redeem_payment_method');
+  assert.equal(b.requests[3].payload?.siteId, '300000000000000000000001');
+  assert.equal(b.requests[3].payload?.returnUrl, 'https://booking.roatanselfstorage.com/account/billing');
+  assert.equal(b.requests[3].payload?.orderId, undefined);
+  assert.deepEqual(b.navigations, [`${pay}/?session=${'b'.repeat(43)}&flow=payment_method`]);
+});
+
+test('V9 keeps reservation operations and payment destination unchanged', async () => {
+  const b = browser({ v9: true }); b.click(); await b.settle();
+  assert.deepEqual(b.requests[1].payload, { operation: 'prepare', userId, orderId });
+  assert.equal(b.requests[3].payload?.operation, 'redeem');
+  assert.deepEqual(b.navigations, [`${pay}/?session=${'b'.repeat(43)}`]);
+});
+
+test('V9 account flow rejects identity changes and unsafe destinations', async () => {
+  for (const options of [{ changedUser: true }, { unsafeDestination: true }]) {
+    const b = browser({ v9: true, account: true, ...options }); b.click(); await b.settle();
+    assert.equal(b.navigations.length, 0);
+    assert.equal(b.logs.length, 1);
+  }
+});

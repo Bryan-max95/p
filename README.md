@@ -21,6 +21,8 @@ El enlace firmado permite abrir el carrusel sin volver a pedir la contraseña. P
 
 ## Publicación
 
+- [METODOS_PAGO_CUENTA.md](METODOS_PAGO_CUENTA.md): registro y consulta de tarjetas desde Billing, script GTM V9 corregido y validaciones pendientes con el banco.
+
 - [CONEXION_GTM_STOREGANISE.md](CONEXION_GTM_STOREGANISE.md): etiqueta de reemplazo, entrada desde GTM y condición pendiente del paso nativo de reserva.
 - [DESPLIEGUE_GITHUB_VERCEL.md](DESPLIEGUE_GITHUB_VERCEL.md): variables, despliegue y tarea programada.
 - [CONFIGURACION_STOREGANISE.md](CONFIGURACION_STOREGANISE.md): contrato de entrada, eventos, registro del pago y activación.

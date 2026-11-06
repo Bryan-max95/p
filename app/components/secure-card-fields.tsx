@@ -28,6 +28,7 @@ export interface SecureCardHandle {
 }
 
 interface Props {
+  contextRequest?: () => Promise<{ captureContext: string; clientLibrary: string; clientLibraryIntegrity: string }>;
   preview?: boolean;
   language: 'es' | 'en';
   numberLabel: string;
@@ -66,7 +67,7 @@ function loadLibrary(url: string, integrity: string) {
 }
 
 /** PAN and security code live exclusively inside CyberSource-owned iframes. */
-export const SecureCardFields = forwardRef<SecureCardHandle, Props>(function SecureCardFields({ preview = false, language, numberLabel, securityLabel, children, expiration, onReady, onBrand }, ref) {
+export const SecureCardFields = forwardRef<SecureCardHandle, Props>(function SecureCardFields({ contextRequest, preview = false, language, numberLabel, securityLabel, children, expiration, onReady, onBrand }, ref) {
   const microform = useRef<Microform | null>(null);
   const [failed, setFailed] = useState(false);
   const callbacks = useRef({ onReady, onBrand, numberLabel, securityLabel });
@@ -95,7 +96,7 @@ export const SecureCardFields = forwardRef<SecureCardHandle, Props>(function Sec
     setFailed(false);
     callbacks.current.onReady(false);
     const initialize = async () => {
-      const context = await paymentRequest<{ captureContext: string; clientLibrary: string; clientLibraryIntegrity: string }>('/api/pay/capture-context', {});
+      const context = await (contextRequest ? contextRequest() : paymentRequest<{ captureContext: string; clientLibrary: string; clientLibraryIntegrity: string }>('/api/pay/capture-context', {}));
       await loadLibrary(context.clientLibrary, context.clientLibraryIntegrity);
       if (!active) return;
       if (!window.Flex) throw new Error('SECURE_FIELDS_UNAVAILABLE');
@@ -125,7 +126,7 @@ export const SecureCardFields = forwardRef<SecureCardHandle, Props>(function Sec
       callbacks.current.onReady(false);
       fields.forEach((field) => { try { field.unload(); } catch { /* Field may already be unmounted. */ } });
     };
-  }, [preview]);
+  }, [preview, contextRequest]);
 
   return (
     <>

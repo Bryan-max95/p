@@ -99,4 +99,26 @@ CREATE TABLE IF NOT EXISTS pay_storeganise_bridge_grants (
   session_id uuid REFERENCES pay_sessions(id), created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS pay_bridge_customer ON pay_storeganise_bridge_grants(api_origin,customer_id,expires_at);
+CREATE TABLE IF NOT EXISTS pay_method_sessions (
+  id uuid PRIMARY KEY, launch_hash text UNIQUE NOT NULL, access_hash text UNIQUE,
+  customer_id text NOT NULL, site_id text NOT NULL, api_origin text NOT NULL,
+  environment text NOT NULL, client_name text NOT NULL, return_url text NOT NULL,
+  expires_at timestamptz NOT NULL, consumed_at timestamptz, capture_context text,
+  status text NOT NULL DEFAULT 'open', method_id uuid, gateway_reference text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS pay_saved_methods (
+  id uuid PRIMARY KEY, customer_id text NOT NULL, site_id text NOT NULL, api_origin text NOT NULL,
+  environment text NOT NULL, gateway_token text NOT NULL, brand text NOT NULL,
+  last4 varchar(4) NOT NULL, exp_month integer NOT NULL, exp_year integer NOT NULL,
+  cardholder text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE(api_origin,environment,customer_id,site_id,gateway_token)
+);
+CREATE TABLE IF NOT EXISTS pay_method_bridge_grants (
+  id uuid PRIMARY KEY, token_hash text UNIQUE NOT NULL, customer_id text NOT NULL,
+  site_id text NOT NULL, api_origin text NOT NULL, environment text NOT NULL,
+  expires_at timestamptz NOT NULL, client_hash text, session_id uuid REFERENCES pay_method_sessions(id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pay_method_bridge_customer ON pay_method_bridge_grants(api_origin,customer_id,expires_at);
 `;

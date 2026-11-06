@@ -1,6 +1,7 @@
 ﻿import { openStoreganiseCheckout } from './checkout';
 
 import { matchingOrderId,storeganiseBookingReturn } from './browser-entry';
+import { openPaymentMethodCheckout } from './payment-methods';
 import { openSignedReservationCheckout } from './reservation';
 import { StoreganiseIntegrationError } from './config';
 
@@ -16,7 +17,9 @@ export async function handleBillingCheckout(payload: Record<string, unknown>) {
   const orderId=matchingOrderId(data.orderId,data.jobId,returnUrl?.searchParams.get('orderId'));
   const ids = { userId:data.userId, orderId,
     siteId:data.siteId===''?undefined:data.siteId, returnUrl:returnUrl?.href };
-  const checkout = orderId && !data.invoiceId
+  const checkout = !orderId && !data.invoiceId && (payload.type ?? payload.event) === 'billing.checkout'
+    ? await openPaymentMethodCheckout(ids)
+    : orderId && !data.invoiceId
     ? await openSignedReservationCheckout(ids)
     : await openStoreganiseCheckout({ ...ids, invoiceId:data.invoiceId });
   const url = checkout.url.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');

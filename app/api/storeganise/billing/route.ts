@@ -25,7 +25,7 @@ export async function POST(req:NextRequest){
       if(event==='pay.checkout')return NextResponse.json({url:result.url},{headers});
       return new NextResponse(result.html,{headers:{...headers,'Content-Type':'text/html; charset=utf-8'}});
     }
-    if(event==='billing.list')return NextResponse.json(await handleBillingList(),{headers});
+    if(event==='billing.list')return NextResponse.json(await handleBillingList(payload),{headers});
     if(event==='billing.charge')return NextResponse.json(await handleBillingCharge(),{status:409,headers});
     if(event&&wakeEvents.has(event)){
       const ids=wakeIds.parse(payload.data);

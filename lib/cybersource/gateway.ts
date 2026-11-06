@@ -178,7 +178,31 @@ export class CyberSourceGateway {
     const last4 = /(?:X|\*|•).*?(\d{4})$/i.exec(masked)?.[1];
     return { tokenJwt, tokenId: payload.jti!, cardType: type as VerifiedTransientToken['cardType'],
       brand: type === '001' ? 'Visa' : type === '002' ? 'Mastercard' : 'American Express',
-      ...(last4 ? { last4 } : {}), expiresAt: new Date(payload.exp! * 1000).toISOString() };
+      ...(last4 ? { last4 } : {}),
+      expirationMonth: String(card?.expirationMonth?.value ?? card?.expirationMonth ?? ''),
+      expirationYear: String(card?.expirationYear?.value ?? card?.expirationYear ?? ''),
+      expiresAt: new Date(payload.exp! * 1000).toISOString() };
+  }
+
+  /** Account verification only: zero amount, no capture, no reservation payment. */
+  async registerPaymentMethod(token: VerifiedTransientToken, reference: string, billTo: BillTo) {
+    const data = await this.request<Json>('POST', '/pts/v2/payments', {
+      clientReferenceInformation: { code: reference },
+      processingInformation: { capture: false, commerceIndicator: 'internet',
+        actionList: ['TOKEN_CREATE'], actionTokenTypes: ['paymentInstrument'] },
+      tokenInformation: { transientTokenJwt: token.tokenJwt },
+      paymentInformation: { card: { type: token.cardType } },
+      orderInformation: { amountDetails: { totalAmount: '0', currency: 'HNL' }, billTo },
+    });
+    const gatewayToken = data.tokenInformation?.paymentInstrument?.id;
+    const amount = data.orderInformation?.amountDetails?.authorizedAmount;
+    const currency = data.orderInformation?.amountDetails?.currency;
+    if (data.status !== 'AUTHORIZED' || typeof gatewayToken !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,128}$/.test(gatewayToken) ||
+      (amount !== undefined && Number(amount) !== 0) || (currency !== undefined && currency !== 'HNL')) {
+      throw new GatewayError(422, 'PAYMENT_METHOD_NOT_REGISTERED', typeof data.id === 'string' ? data.id : undefined);
+    }
+    return { gatewayToken, transactionId: typeof data.id === 'string' ? data.id : undefined };
   }
 
   async pay(input: { token: VerifiedTransientToken; reference: string; amount: string; currency: string;

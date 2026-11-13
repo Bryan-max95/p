@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
+import CompanyLogo from './company-logo';
 import { SecureCardFields, type SecureCardHandle } from './secure-card-fields';
 import { BillingDetailsFields, readBillingDetails } from './billing-details-fields';
 
@@ -75,12 +76,12 @@ export default function PaymentMethodCarousel() {
   return <main className="min-h-screen bg-slate-50 px-4 py-8 text-slate-800">
     <div className="mx-auto max-w-2xl space-y-5">
       <header className="text-center space-y-3">
-        <Image src="/roatan-logo.svg" alt="Roatan Self Storage" width={80} height={80} className="mx-auto rounded-xl" />
         <h1 className="text-3xl font-extrabold text-[#112a52]">Añadir método de pago</h1>
         <p>Guarda tu tarjeta de forma segura en Roatan Self Storage.</p>
         <Image src="https://www.baccredomatic.com/themes/custom/bac_theme/images/logo.png" alt="BAC Credomatic" width={132} height={40} className="mx-auto" unoptimized />
       </header>
       <section id="card-payment-carousel" className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-9 shadow-xl space-y-6">
+        <CompanyLogo />
         <nav aria-label="Pasos" className="flex justify-between border-b pb-4 text-sm font-bold">
           {['1. Mi cuenta', '2. Tarjeta', '3. Confirmación'].map((label, index) => <span key={label} aria-current={step === index + 1 ? 'step' : undefined} className={step >= index + 1 ? 'text-[#1F5C4F]' : 'text-slate-400'}>{label}</span>)}
         </nav>

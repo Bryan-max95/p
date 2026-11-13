@@ -6,6 +6,6 @@ Las notas se organizan en carpetas por fecha (`AAAA-MM-DD`), con un archivo Mark
 
 ## Última tarea
 
-[2026-11-13 · Subida a GitHub de los cambios de facturas V10](2026-11-13/01-subida-github-facturas-v10.md)
+[2026-11-13 · Logo oficial dentro de los carruseles](2026-11-13/02-logo-oficial-carrusel.md)
 
-Los cambios de Pay se subieron a `Bryan-max95/p`, rama `main`, en el commit `32a43c4`; se verificó el mismo identificador en GitHub mediante `git ls-remote`. Incluye los 2 archivos nuevos y 14 reemplazos solicitados, además de pruebas, scripts de referencia y documentación. El código coincide con la versión validada anteriormente con 31 pruebas dirigidas, compilación y recorridos simulados correctos; se conserva el registro de los 27 fallos históricos. Falta confirmar el despliegue de Vercel y una transacción bancaria autorizada. El usuario publicará manualmente GTM; no lo publicó el agente.
+Se aplicó el PNG oficial proporcionado por el usuario dentro de los carruseles de pago y añadir tarjeta, centrado y con tamaños adaptados a móvil/escritorio. Se retiraron los logos anteriores duplicados en esas vistas y se excluyeron las copias locales de entrega/respaldo de TypeScript. Compilación, lint dirigido y revisión visual en móvil/escritorio correctos; pendiente registrar la subida del logo. La implementación previa de facturas está en GitHub en `32a43c4`; GTM sigue a cargo del usuario y la comprobación bancaria real continúa pendiente.

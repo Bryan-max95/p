@@ -3,6 +3,7 @@
 import React, { useRef, useState } from 'react';
 import Image from 'next/image';
 import PayTransition from './pay-transition';
+import CompanyLogo from './company-logo';
 import Link from 'next/link';
 import { 
   motion, 
@@ -346,110 +347,8 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
           </div>
         </div>
 
-        {/* Encabezado con Logo oficial Roatan Self Storage */}
+        {/* Encabezado del portal */}
         <header className="text-center mb-6 flex flex-col items-center">
-          <div className="w-36 h-36 mb-3 transition-transform hover:scale-105 duration-300 flex items-center justify-center">
-            <svg viewBox="0 0 200 200" className="w-full h-full" id="roatan-logo-header" aria-label="Roatan Self Storage Logo">
-              {/* Roof Structure */}
-              <path 
-                d="M 32,82 L 100,20 L 168,82" 
-                stroke="#111827" 
-                strokeWidth="6.5" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                fill="none" 
-              />
-              <path 
-                d="M 49,81 L 49,94" 
-                stroke="#111827" 
-                strokeWidth="6.5" 
-                strokeLinecap="round" 
-                fill="none" 
-              />
-              <path 
-                d="M 151,81 L 151,94" 
-                stroke="#111827" 
-                strokeWidth="6.5" 
-                strokeLinecap="round" 
-                fill="none" 
-              />
-              <path 
-                d="M 59,82 L 100,45 L 141,82" 
-                stroke="#111827" 
-                strokeWidth="6.5" 
-                strokeLinecap="round" 
-                strokeLinejoin="round" 
-                fill="none" 
-              />
-
-              {/* Golden/Yellow Circle */}
-              <circle 
-                cx="100" 
-                cy="63.5" 
-                r="19" 
-                fill="#f2b807" 
-                stroke="#111827" 
-                strokeWidth="6.5" 
-              />
-
-              {/* Black Keyhole */}
-              <path 
-                d="M 100,55 A 4.5,4.5 0 0,0 96.8,62 L 95.2,71.5 C 95.1,72.1 95.6,72.6 96.2,72.6 L 103.8,72.6 C 104.4,72.6 104.9,72.1 104.8,71.5 L 103.2,62 A 4.5,4.5 0 0,0 100,55 Z" 
-                fill="#111827" 
-              />
-
-              {/* ROATAN Text */}
-              <text 
-                x="100" 
-                y="119" 
-                textAnchor="middle" 
-                fill="#084c2e" 
-                style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 900 }}
-                fontSize="24" 
-                letterSpacing="0.5"
-              >
-                ROATAN
-              </text>
-
-              {/* Divider Line */}
-              <line 
-                x1="48" 
-                y1="128" 
-                x2="152" 
-                y2="128" 
-                stroke="#111827" 
-                strokeWidth="4.5" 
-                strokeLinecap="round" 
-              />
-
-              {/* SELF STORAGE Text */}
-              <text 
-                x="100" 
-                y="151" 
-                textAnchor="middle" 
-                fill="#084c2e" 
-                style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 900 }}
-                fontSize="19.5" 
-                letterSpacing="0.2"
-              >
-                SELF STORAGE
-              </text>
-
-              {/* SAFE & SECURE Text */}
-              <text 
-                x="100" 
-                y="173" 
-                textAnchor="middle" 
-                fill="#111827" 
-                style={{ fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 900 }}
-                fontSize="14.5" 
-                letterSpacing="0.5"
-              >
-                SAFE & SECURE
-              </text>
-            </svg>
-          </div>
-
           <h1 className="text-2xl sm:text-3xl font-display font-extrabold text-[#112a52] tracking-tight">
             {t.portalTitle}
           </h1>
@@ -484,6 +383,7 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
 
         {/* CONTENEDOR PRINCIPAL: CARRUSEL DE PAGO CON TARJETA */}
         <div className="bg-white rounded-3xl p-6 sm:p-9 shadow-xl border border-slate-200/80 relative overflow-hidden" id="card-payment-carousel">
+          <div className="mb-6"><CompanyLogo /></div>
           
           {/* Indicador de pasos del carrusel */}
           <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-100">
@@ -756,19 +656,6 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                 <div className="flex justify-center py-2">
                   <div className="w-full max-w-sm h-48 rounded-2xl bg-[#173f38] p-6 text-white shadow-xl relative overflow-hidden flex flex-col justify-between border border-[#2f6f61] transition-transform duration-300">
                     
-                    {/* Marca de agua de Roatan Self Storage */}
-                    <svg
-                      viewBox="0 0 200 200"
-                      aria-hidden="true"
-                      className="pointer-events-none absolute -bottom-8 right-5 h-44 w-44 text-white opacity-[0.07]"
-                    >
-                      <path d="M32 82 100 20l68 62M49 81v13M151 81v13M59 82l41-37 41 37" stroke="currentColor" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-                      <circle cx="100" cy="63.5" r="19" fill="none" stroke="currentColor" strokeWidth="7" />
-                      <path d="M100 55a4.5 4.5 0 0 0-3.2 7l-1.6 9.5c-.1.6.4 1.1 1 1.1h7.6c.6 0 1.1-.5 1-1.1l-1.6-9.5a4.5 4.5 0 0 0-3.2-7Z" fill="currentColor" />
-                      <text x="100" y="119" textAnchor="middle" fill="currentColor" fontFamily="system-ui, sans-serif" fontWeight="900" fontSize="24">ROATAN</text>
-                      <line x1="48" y1="128" x2="152" y2="128" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" />
-                      <text x="100" y="151" textAnchor="middle" fill="currentColor" fontFamily="system-ui, sans-serif" fontWeight="900" fontSize="19.5">SELF STORAGE</text>
-                    </svg>
                     <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/25" />
                     <div className="pointer-events-none absolute -left-16 top-14 h-28 w-72 rotate-[-18deg] bg-white/[0.025]" />
 

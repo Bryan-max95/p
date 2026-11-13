@@ -178,12 +178,21 @@ function CardBrandLogo({ brand, active = true }: { brand: Exclude<CardBrand, 'de
 
 export default function PaymentCarousel({ manualEnabled = false }: { manualEnabled?: boolean }) {
   const [lang, setLang] = useState<'es' | 'en'>('es');
-  const t = TRANSLATIONS[lang];
 
   // Carousel slide step: 1 = Unit Details, 2 = Card Details, 3 = Confirmation Receipt
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
 
   const payment = usePaymentSession(manualEnabled);
+  const invoicePayment = payment.session?.storeganise?.kind === 'account_invoice';
+  const t = { ...TRANSLATIONS[lang], ...(invoicePayment ? (lang === 'es' ? {
+    portalSubtitle: 'Pague su factura de forma segura en', step1Tab: '1. Datos de Factura',
+    step1Title: 'Detalles de su factura', step1Desc: 'Revise el servicio y el saldo pendiente antes de ingresar su tarjeta.',
+    labelUnitNumber: 'Referencia de factura', unitSummaryLabel: 'Factura', labelReceiptUnit: 'Factura:', labelAmount: 'Saldo pendiente (USD)',
+  } : {
+    portalSubtitle: 'Pay your invoice securely at', step1Tab: '1. Invoice Details',
+    step1Title: 'Your invoice details', step1Desc: 'Review the service and outstanding balance before entering your card details.',
+    labelUnitNumber: 'Invoice reference', unitSummaryLabel: 'Invoice', labelReceiptUnit: 'Invoice:', labelAmount: 'Outstanding balance (USD)',
+  }) : {}) };
   const liveSandbox = payment.session?.storeganise?.status === 'sandbox_only';
   const sandboxActivation = payment.session?.storeganise?.sandboxActivation === true;
   const simulatedPayment = payment.session?.environment === 'sandbox';
@@ -936,13 +945,29 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                       ? (lang==='es'?'Transacción de prueba guardada. No aplica pagos a facturas fiscales ni activa bodegas.':'Test transaction saved. It does not pay fiscal invoices or activate storage units.')
                       : payment.session?.source === 'manual'
                         ? (lang==='es'?'Conserve este comprobante. Roatan Self Storage registrará la aplicación del pago a su cuenta.':'Keep this receipt. Roatan Self Storage will record the payment against your account.')
+                        : invoicePayment
+                          ? (payment.session?.storeganise?.status==='invoice_paid'
+                            ? (lang==='es'?'Pago registrado. Su factura está pagada en Storeganise.':'Payment recorded. Your invoice is paid in Storeganise.')
+                            : (lang==='es'?'Su cobro está confirmado. Estamos registrando el pago en su factura.':'Your charge is confirmed. We are recording the payment against your invoice.'))
                         : payment.session?.storeganise?.status==='active'
                           ? (lang==='es'?'Pago registrado por tarjeta. Su bodega está habilitada en Storeganise.':'Card payment recorded. Your unit is available in Storeganise.')
                           : (lang==='es'?'Su pago está guardado. Estamos confirmando su registro y el estado de su bodega con Storeganise.':'Your payment is saved. We are confirming its registration and your unit status with Storeganise.')}
                   </p>
                 </div>
 
-                {payment.session?.storeganise && <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2" role="status">
+                {payment.session?.storeganise && invoicePayment && <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2" role="status" data-testid="invoice-status">
+                  <p className="font-bold text-slate-800">{lang==='es'?'Estado de su factura':'Invoice status'}</p>
+                  <p>{liveSandbox
+                    ? (lang==='es'?'Prueba finalizada. Este pago de prueba no se aplica a su factura real.':'Test completed. This test payment is not applied to your real invoice.')
+                    : payment.session.storeganise.status==='invoice_paid'
+                      ? (lang==='es'?'Factura pagada. Puede regresar a su cuenta.':'Invoice paid. You can return to your account.')
+                      : payment.session.storeganise.status==='review'
+                        ? (lang==='es'?'Cobro confirmado. El registro en su factura necesita revisión de Roatan Self Storage. Conserve su comprobante y no vuelva a pagar.':'Charge confirmed. Recording it against your invoice needs review by Roatan Self Storage. Keep your receipt and do not pay again.')
+                        : (lang==='es'?'Estamos registrando su pago en Storeganise. No vuelva a pagar; la confirmación se actualizará automáticamente.':'We are recording your payment in Storeganise. Do not pay again; confirmation will update automatically.')}</p>
+                  {!liveSandbox&&payment.session.storeganise.status!=='invoice_paid'&&<button type="button" onClick={()=>void payment.refresh().catch(()=>{})} className="font-bold underline text-xs">{lang==='es'?'Actualizar estado':'Refresh status'}</button>}
+                </div>}
+
+                {payment.session?.storeganise && !invoicePayment && <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm space-y-2" role="status">
                   <p className="font-bold text-slate-800">{lang==='es'?'Estado de su reserva':'Booking status'}</p>
                   <p>{liveSandbox
                     ? (lang==='es'?'Prueba finalizada. Su reserva real sigue sin registrar este pago de prueba y su bodega no se activa con esta operación.':'Test completed. This test payment is not applied to your real booking and does not activate your unit.')
@@ -958,8 +983,8 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                   {!liveSandbox&&payment.session.storeganise.status!=='active'&&<button type="button" onClick={()=>void payment.refresh().catch(()=>{})} className="font-bold underline text-xs">{lang==='es'?'Actualizar estado':'Refresh status'}</button>}
                 </div>}
 
-                {payment.session?.receipt&&payment.session.storeganise?.status==='active'&&
-                  <StoreganiseReturn sessionId={payment.session.id} url={payment.session.storeganise.returnUrl} language={lang} />}
+                {payment.session?.receipt&&payment.session.storeganise&&['active','invoice_paid'].includes(payment.session.storeganise.status)&&
+                  <StoreganiseReturn sessionId={payment.session.id} url={payment.session.storeganise.returnUrl} language={lang} invoice={invoicePayment} />}
 
                 {/* Recibo digital con bordes limpios */}
                 <div className="bg-[#f8fafc] rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
@@ -984,6 +1009,9 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
 
                     <span className="text-slate-500 font-medium">{t.labelReceiptUnit}</span>
                     <span className="text-right font-bold text-slate-900">{receiptData.unit}</span>
+
+                    {invoicePayment && <><span className="text-slate-500 font-medium">{lang==='es'?'Concepto:':'Description:'}</span>
+                      <span className="text-right text-slate-900">{payment.session?.concept}</span></>}
 
                     <span className="text-slate-500 font-medium">{t.labelReceiptClient}</span>
                     <span className="text-right font-bold text-slate-900">{receiptData.client}</span>

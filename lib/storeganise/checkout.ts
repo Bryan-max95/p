@@ -127,6 +127,10 @@ export async function verifyStoreganiseCheckout(session: SessionRow) {
   if (session.environment !== environment || session.storeganise_context.apiOrigin !== url.origin) {
     throw new StoreganiseIntegrationError('STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH', 409);
   }
+  if (session.storeganise_context.kind === 'account_invoice') {
+    const { verifyAccountInvoiceCheckout } = await import('./invoice-checkout');
+    return verifyAccountInvoiceCheckout(session);
+  }
   if (session.storeganise_context.kind === 'reservation') {
     const { prepareReservationForPayment } = await import('./reservation');
     await prepareReservationForPayment(session);

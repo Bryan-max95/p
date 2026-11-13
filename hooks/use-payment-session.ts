@@ -45,7 +45,7 @@ export interface PaymentSession {
   billingRequired?: boolean;
   billingDetails?: BillTo;
   requiresReservationConfirmation?: boolean;
-  storeganise?: { status: string; paymentId?: string; returnUrl: string; sandboxActivation?: boolean };
+  storeganise?: { status: string; paymentId?: string; returnUrl: string; sandboxActivation?: boolean; kind?: string; invoiceReference?: string };
 }
 
 export interface BankAuthentication {
@@ -201,7 +201,7 @@ export function usePaymentSession(manualEnabled = false) {
   }, [acceptResponse, manualEnabled]);
 
   const pending = uncertain || ['processing', 'unknown', 'pending', 'reconciling'].includes(session?.status ?? '');
-  const awaitingStoreganise = Boolean(session?.receipt && session.storeganise && !['active','sandbox_only'].includes(session.storeganise.status));
+  const awaitingStoreganise = Boolean(session?.receipt && session.storeganise && !['active','invoice_paid','sandbox_only'].includes(session.storeganise.status));
   const sessionId = session?.id;
 
   useEffect(() => {

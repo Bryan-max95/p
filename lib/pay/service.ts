@@ -119,6 +119,7 @@ export function publicSession(row: SessionRow) {
       requiresReservationConfirmation: !liveSandbox && row.storeganise_context.kind === 'reservation' &&
         !['signed-checkout','profile-bridge'].includes(row.storeganise_context.reservationAuthentication ?? ''),
       storeganise: { status: isolatedSandbox ? 'sandbox_only' : row.storeganise_status ?? 'waiting_payment', paymentId: isolatedSandbox ? undefined : row.storeganise_payment_id ?? undefined,
+        kind: row.storeganise_context.kind, invoiceReference: row.storeganise_context.invoiceReference,
         sandboxActivation: hasSandboxActivation(row),
         returnUrl: storeganiseReturnUrl(row.return_url) },
     } : {}),

@@ -14,7 +14,7 @@ export async function GET(){
     if(session.environment!==gatewayEnvironment())return NextResponse.json({error:'SESSION_ENVIRONMENT_CHANGED'},{status:409,headers:{'Cache-Control':'no-store'}});
     const updated=['processing','pending','unknown'].includes(session.status)||needsLegacyPaymentReview(session)?await reconcileSession(session.id):undefined;
     const current=updated??session;
-    if(current.status==='succeeded'&&storeganisePaymentWritesAllowed(current)&&current.storeganise_status!=='active'){
+    if(current.status==='succeeded'&&storeganisePaymentWritesAllowed(current)&&!['active','invoice_paid'].includes(current.storeganise_status??'')){
       after(async()=>{try{await syncStoreganiseSession(current.id);}catch{/* The durable queue retains this delivery. */}});
     }
     return NextResponse.json({session:publicSession(current)},{headers:{'Cache-Control':'no-store'}});

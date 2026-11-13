@@ -2,7 +2,8 @@ import type { BillTo } from '@/lib/cybersource/types';
 import type { GatewayEnvironment } from '@/lib/cybersource/environment';
 
 export interface StoreganiseContext {
-  kind?: 'invoice' | 'reservation';
+  kind?: 'invoice' | 'reservation' | 'account_invoice';
+  invoiceReference?: string;
   apiOrigin: string; customerId: string; invoiceId?: string; rentalId?: string;
   unitId: string; siteId: string; jobId?: string;
   unitTypeId?: string;

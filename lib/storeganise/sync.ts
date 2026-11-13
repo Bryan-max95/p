@@ -8,6 +8,7 @@ import { storeganisePaymentWritesAllowed } from './payment-policy';
 import { bindPaidReservation, completePaidMoveIn } from './paid-booking';
 import { hnlCharge } from '../pay/exchange-rate';
 import { BCH_INDICATOR_ID } from '../pay/bch';
+import { accountInvoiceStates, assertAccountInvoiceBinding, getAccountInvoice, type AccountInvoice } from './invoice-checkout';
 
 interface Delivery {
   session_id: string; transaction_id: string; attempt_count: number;
@@ -15,12 +16,12 @@ interface Delivery {
 }
 
 async function saveProgress(delivery: Delivery, status: string, error?: string, paymentId?: string) {
-  const delay = status === 'active' ? 86400 : status === 'review' ? 300 :
+  const delay = ['active','invoice_paid'].includes(status) ? 86400 : status === 'review' ? 300 :
     status === 'awaiting_move_in' ? 30 : Math.min(1800, 15 * 2 ** Math.min(delivery.attempt_count, 7));
   await transaction(async client => {
     const claimed = await client.query(`UPDATE storeganise_deliveries SET status=$3,last_error=$4,
       lease_token=NULL,lease_until=NULL,next_attempt_at=now()+($5*interval '1 second'),updated_at=now(),
-      delivered_at=CASE WHEN $3='active' THEN now() ELSE delivered_at END
+      delivered_at=CASE WHEN $3 IN ('active','invoice_paid') THEN now() ELSE delivered_at END
       WHERE session_id=$1 AND lease_token=$2 RETURNING session_id`,
     [delivery.session_id,delivery.lease_token,status,error??null,delay]);
     if (!claimed.rowCount) return;
@@ -38,7 +39,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
     lease_until=now()+interval '3 minutes',status='sending',attempt_count=attempt_count+1,updated_at=now()
     FROM pay_sessions s WHERE d.session_id=s.id AND d.session_id=$1 AND s.status='succeeded'
       AND s.storeganise_context IS NOT NULL AND s.is_demo=false AND s.checkout_source='storeganise'
-      AND s.gateway_transaction_id=d.transaction_id AND d.status NOT IN ('active','sandbox_only')
+      AND s.gateway_transaction_id=d.transaction_id AND d.status NOT IN ('active','invoice_paid','sandbox_only')
       AND d.next_attempt_at<=now() AND (d.lease_until IS NULL OR d.lease_until<now()) RETURNING d.*`, [sessionId,lease]);
   const delivery = claimed.rows[0];
   if (!delivery) return;
@@ -61,21 +62,29 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
       await saveProgress(delivery, 'awaiting_reservation', 'STOREGANISE_RESERVATION_PENDING'); return;
     }
     const binding = session.storeganise_context;
-    if (!binding || !binding.invoiceId || !binding.rentalId || binding.kind === 'reservation' || binding.apiOrigin !== url.origin || session.environment !== environment ||
+    if (!binding || !binding.invoiceId || binding.kind === 'reservation' || binding.apiOrigin !== url.origin || session.environment !== environment ||
       binding.customerId !== session.customer_id || binding.invoiceId !== session.invoice_id ||
       binding.unitId !== session.unit_id || !session.reference_usd_amount || !session.paid_at) {
       throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
     }
-    const context = await invoiceContext(binding.invoiceId,binding.customerId,binding.jobId);
-    if (context.rental.id !== binding.rentalId || context.invoice.siteId !== binding.siteId || context.invoice.deleted ||
-      context.rental.endDate || ['ended','archived','cancelled','canceled'].includes(context.rental.state) ||
-      ['blocked','archived','unassigned'].includes(context.unit.state)) {
-      throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
+    const accountInvoice = binding.kind === 'account_invoice';
+    let invoice: AccountInvoice;
+    if (accountInvoice) {
+      invoice = await getAccountInvoice(binding.invoiceId);
+      assertAccountInvoiceBinding(session, invoice);
+    } else {
+      if (!binding.rentalId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
+      const context = await invoiceContext(binding.invoiceId,binding.customerId,binding.jobId);
+      if (context.rental.id !== binding.rentalId || context.invoice.siteId !== binding.siteId || context.invoice.deleted ||
+        context.rental.endDate || ['ended','archived','cancelled','canceled'].includes(context.rental.state) ||
+        ['blocked','archived','unassigned'].includes(context.unit.state)) {
+        throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
+      }
+      invoice = { ...context.invoice, entries: [] };
     }
     const amount = Number(session.reference_usd_amount).toFixed(2);
     const method = process.env.STOREGANISE_CARD_PAYMENT_METHOD ?? 'card';
     const marker = `Pay/CyberSource [${session.environment}:${delivery.transaction_id}]`;
-    let invoice = context.invoice;
     const matchingPayment = () => {
       const matches = invoice.payments.filter(payment => !payment.deleted && payment.notes?.split('\n')[0] === marker);
       if (matches.length > 1) throw new StoreganiseIntegrationError('DUPLICATE_STOREGANISE_PAYMENT');
@@ -92,7 +101,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
         // repeat a financial write based solely on an absent/eventually-consistent read.
         await saveProgress(delivery,'review','STOREGANISE_WRITE_UNCONFIRMED'); return;
       }
-      if (!['sent','overdue'].includes(invoice.state) || invoice.balance.toFixed(2) !== amount) {
+      if (!(accountInvoice ? accountInvoiceStates : ['sent','overdue']).includes(invoice.state) || invoice.balance.toFixed(2) !== amount) {
         await saveProgress(delivery,'review','INVOICE_CHANGED_AFTER_PAYMENT'); return;
       }
       const writing = await query(`UPDATE storeganise_deliveries SET payment_write_started=true,updated_at=now()
@@ -110,15 +119,20 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
       await storeganiseRequest(`/invoices/${binding.invoiceId}/payments`,'POST',{
         type:'manual',method,amount:Number(amount),date:session.paid_at.toISOString().slice(0,10),notes,
       });
-      invoice = await getInvoice(binding.invoiceId);
+      invoice = accountInvoice ? await getAccountInvoice(binding.invoiceId) : { ...await getInvoice(binding.invoiceId), entries: [] };
+      if (accountInvoice) assertAccountInvoiceBinding(session, invoice);
       payment = matchingPayment();
       if (!payment) { await saveProgress(delivery,'review','STOREGANISE_WRITE_UNCONFIRMED'); return; }
     }
     if (invoice.state !== 'paid' || Math.abs(invoice.balance) > 0.00001) {
       await saveProgress(delivery,'review','STOREGANISE_BALANCE_NOT_SETTLED',payment.id); return;
     }
-    const active = await completePaidMoveIn(session);
-    await saveProgress(delivery,active?'active':'awaiting_move_in',undefined,payment.id);
+    if (accountInvoice) {
+      await saveProgress(delivery,'invoice_paid',undefined,payment.id);
+    } else {
+      const active = await completePaidMoveIn(session);
+      await saveProgress(delivery,active?'active':'awaiting_move_in',undefined,payment.id);
+    }
   } catch (error) {
     const code = error instanceof StoreganiseIntegrationError ? error.code : error instanceof StoreganiseApiError ?
       `STOREGANISE_${error.code}${error.status ? `_${error.status}` : ''}` : 'STOREGANISE_SYNC_UNAVAILABLE';
@@ -132,7 +146,7 @@ export async function syncStoreganiseSession(sessionId: string): Promise<void> {
 export async function retryDueStoreganiseDeliveries() {
   if (process.env.STOREGANISE_PAY_ENABLED !== 'true') return;
   const due = await query<{session_id:string}>(`SELECT session_id FROM storeganise_deliveries
-    WHERE status NOT IN ('active','sandbox_only') AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now())
+    WHERE status NOT IN ('active','invoice_paid','sandbox_only') AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now())
     ORDER BY next_attempt_at LIMIT 3`);
   await Promise.allSettled(due.rows.map(row => syncStoreganiseSession(row.session_id)));
 }
@@ -140,7 +154,7 @@ export async function retryDueStoreganiseDeliveries() {
 /** Signed Storeganise state events wake existing deliveries; an event never proves payment. */
 export async function wakeStoreganiseDeliveries(ids: {invoiceId?: string; jobId?: string; unitId?: string; unitRentalId?: string}) {
   if (!Object.values(ids).some(Boolean)) return;
-  await query(`UPDATE storeganise_deliveries d SET next_attempt_at=now(),status=CASE WHEN d.status='active' THEN 'pending' ELSE d.status END FROM pay_sessions s
+  await query(`UPDATE storeganise_deliveries d SET next_attempt_at=now(),status=CASE WHEN d.status IN ('active','invoice_paid') THEN 'pending' ELSE d.status END FROM pay_sessions s
     WHERE d.session_id=s.id AND s.status='succeeded' AND s.storeganise_context IS NOT NULL AND d.status<>'sandbox_only'
       AND (($1::text IS NOT NULL AND s.invoice_id=$1) OR ($2::text IS NOT NULL AND s.storeganise_context->>'jobId'=$2)
         OR ($3::text IS NOT NULL AND s.unit_id=$3) OR ($4::text IS NOT NULL AND s.storeganise_context->>'rentalId'=$4))`,

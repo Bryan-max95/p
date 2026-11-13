@@ -121,4 +121,12 @@ CREATE TABLE IF NOT EXISTS pay_method_bridge_grants (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS pay_method_bridge_customer ON pay_method_bridge_grants(api_origin,customer_id,expires_at);
+CREATE TABLE IF NOT EXISTS pay_invoice_bridge_grants (
+  id uuid PRIMARY KEY, token_hash text UNIQUE NOT NULL, customer_id text NOT NULL,
+  invoice_id text NOT NULL, invoice_ref text NOT NULL, site_id text NOT NULL,
+  api_origin text NOT NULL, environment text NOT NULL CHECK(environment IN ('sandbox','production')),
+  expires_at timestamptz NOT NULL, client_hash text, lease_token uuid, lease_until timestamptz,
+  session_id uuid REFERENCES pay_sessions(id), created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pay_invoice_bridge_customer ON pay_invoice_bridge_grants(api_origin,customer_id,expires_at);
 `;

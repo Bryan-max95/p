@@ -6,6 +6,7 @@ import { StoreganiseIntegrationError } from '@/lib/storeganise/config';
 import { bridgeInput } from '@/lib/storeganise/bridge-protocol';
 import { limitBridgeRequests, prepareProfileBridge, redeemProfileBridge } from '@/lib/storeganise/bridge';
 import { prepareMethodBridge, redeemMethodBridge } from '@/lib/storeganise/payment-method-bridge';
+import { prepareInvoiceBridge, redeemInvoiceBridge } from '@/lib/storeganise/invoice-bridge';
 import { describeBridgeFailure, type BridgeStage } from '@/lib/storeganise/bridge-diagnostics';
 
 export const runtime = 'nodejs';
@@ -59,6 +60,8 @@ export async function POST(req: NextRequest) {
     const result = input.operation === 'prepare' ? await prepareProfileBridge(input)
       : input.operation === 'redeem' ? await redeemProfileBridge(input, origin)
       : input.operation === 'prepare_payment_method' ? await prepareMethodBridge(input)
+      : input.operation === 'prepare_invoice' ? await prepareInvoiceBridge(input)
+      : input.operation === 'redeem_invoice' ? await redeemInvoiceBridge(input, origin)
       : await redeemMethodBridge(input, origin);
     return NextResponse.json(result, { headers });
   } catch (error) {

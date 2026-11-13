@@ -79,7 +79,7 @@ export async function prepareProfileBridge(input: Extract<z.infer<typeof bridgeI
       const profile = JSON.parse(String(freshUser.customFields?.[BRIDGE_FIELD] ?? '{}'));
       if (profile.version === 1 && Array.isArray(profile.grants)) {
         methodGrants = profile.grants.filter((g: { purpose?: string; expiresAt?: string }) =>
-          g && g.purpose === 'payment_method' && typeof g.expiresAt === 'string' && Date.parse(g.expiresAt) > Date.now());
+          g && (g.purpose === 'payment_method' || g.purpose === 'invoice') && typeof g.expiresAt === 'string' && Date.parse(g.expiresAt) > Date.now());
       }
     } catch { /* No prior account-card grant. */ }
     const delivery = JSON.stringify({ version: 1, grants: [...grants, ...methodGrants] });

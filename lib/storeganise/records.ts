@@ -3,6 +3,7 @@ import { storeganiseGet } from './client';
 import { StoreganiseIntegrationError } from './config';
 
 export const sgId = z.string().regex(/^[a-f0-9]{24}$/i);
+export const invoiceReference = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i).transform(value => value.toLowerCase());
 const id = sgId;
 export const invoiceSchema = z.object({
   id, owner: z.object({ id }), unitRentalId: id, siteId: id,

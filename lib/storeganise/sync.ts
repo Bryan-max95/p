@@ -17,7 +17,7 @@ interface Delivery {
 
 async function saveProgress(delivery: Delivery, status: string, error?: string, paymentId?: string) {
   const delay = ['active','invoice_paid'].includes(status) ? 86400 : status === 'review' ? 300 :
-    status === 'awaiting_move_in' ? 30 : Math.min(1800, 15 * 2 ** Math.min(delivery.attempt_count, 7));
+    ['awaiting_reservation','awaiting_move_in'].includes(status) ? 15 : Math.min(1800, 15 * 2 ** Math.min(delivery.attempt_count, 7));
   await transaction(async client => {
     const claimed = await client.query(`UPDATE storeganise_deliveries SET status=$3,last_error=$4,
       lease_token=NULL,lease_until=NULL,next_attempt_at=now()+($5*interval '1 second'),updated_at=now(),

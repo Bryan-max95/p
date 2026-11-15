@@ -5,14 +5,15 @@ import { handleBillingList } from '@/lib/storeganise/billing-list';
 import { handleBillingCharge } from '@/lib/storeganise/billing-charge';
 import { readStoreganiseWebhook,integrationErrorResponse } from '@/lib/storeganise/webhook';
 import { wakeStoreganiseDeliveries,retryDueStoreganiseDeliveries } from '@/lib/storeganise/sync';
-import { sgId } from '@/lib/storeganise/records';
+import { getInvoice,getRental,sgId } from '@/lib/storeganise/records';
 
 export const runtime='nodejs';
 export const maxDuration=60;
 export const dynamic='force-dynamic';
 const headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'};
 const wakeEvents=new Set(['invoice.payments.updated','invoice.state.updated','invoice.deleted',
-  'job.unit_moveIn.completed','job.unit_moveIn.cancelled','unit.occupied','unit.unassigned','unitRental.updated']);
+  'job.unit_moveIn.created','job.unit_moveIn.started','job.unit_moveIn.completed','job.unit_moveIn.cancelled',
+  'unitRental.invoice.created','unit.reserved','unit.occupied','unit.unassigned','unitRental.updated']);
 const wakeIds=z.object({invoiceId:sgId.optional(),jobId:sgId.optional(),unitId:sgId.optional(),unitRentalId:sgId.optional()});
 
 export async function GET(){return NextResponse.json({ok:true,service:'Storeganise payment handoff'},{headers});}
@@ -35,8 +36,19 @@ export async function POST(req:NextRequest){
       if(entityId.success){
         if(event.startsWith('invoice.'))ids.invoiceId??=entityId.data;
         else if(event.startsWith('job.'))ids.jobId??=entityId.data;
-        else if(event.startsWith('unitRental.'))ids.unitRentalId??=entityId.data;
+        else if(event==='unitRental.updated')ids.unitRentalId??=entityId.data;
         else if(event.startsWith('unit.'))ids.unitId??=entityId.data;
+      }
+      if(event==='unitRental.invoice.created'){
+        // Before binding, a paid reservation has neither invoiceId nor rentalId.
+        // Resolve the new invoice's exact move-in job so this event can wake it.
+        // Use explicit IDs: data.id is ambiguous for this composite event.
+        if(!ids.unitRentalId&&ids.invoiceId)ids.unitRentalId=(await getInvoice(ids.invoiceId)).unitRentalId;
+        if(ids.unitRentalId){
+          const rental=await getRental(ids.unitRentalId);
+          ids.jobId??=rental.moveInJobId;
+          ids.unitId??=rental.unitId;
+        }
       }
       await wakeStoreganiseDeliveries(ids);
       after(()=>retryDueStoreganiseDeliveries());

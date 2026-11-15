@@ -45,7 +45,7 @@ export interface PaymentSession {
   billingRequired?: boolean;
   billingDetails?: BillTo;
   requiresReservationConfirmation?: boolean;
-  storeganise?: { status: string; paymentId?: string; returnUrl: string; sandboxActivation?: boolean; kind?: string; invoiceReference?: string };
+  storeganise?: { status: string; paymentId?: string; returnUrl: string; successUrl?: string; sandboxActivation?: boolean; kind?: string; invoiceReference?: string };
 }
 
 export interface BankAuthentication {
@@ -229,7 +229,13 @@ export function usePaymentSession(manualEnabled = false) {
         'INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE','STOREGANISE_CHECKOUT_UNAVAILABLE',
         'STOREGANISE_PAY_DISABLED','STOREGANISE_SANDBOX_INSTANCE_REQUIRED','STOREGANISE_INSTANCE_ENVIRONMENT_MISMATCH',
         'STOREGANISE_CUSTOMER_LOGIN_REQUIRED','STOREGANISE_RESERVATION_PENDING','STOREGANISE_RESERVATION_REFRESH_REQUIRED',
+        'STOREGANISE_RESERVATION_ACTION_REQUIRED','STOREGANISE_CURRENCY_MISMATCH','STOREGANISE_CARD_METHOD_NOT_CONFIGURED',
         'STOREGANISE_RESERVATION_CONFIRMATION_REQUIRED','STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED','STOREGANISE_IDENTITY_MISMATCH'].includes(failure.code)) {
+        setRequestError(failure.code); setUncertain(false); return;
+      }
+      // This response is only emitted by the payment-start route before it can
+      // authorize a charge. Network failures still follow the uncertain path.
+      if (path === '/api/pay/payments' && failure instanceof PaymentRequestError && failure.code === 'PAYMENT_NOT_STARTED') {
         setRequestError(failure.code); setUncertain(false); return;
       }
       // The request may have reached the processor. Consult durable server state,

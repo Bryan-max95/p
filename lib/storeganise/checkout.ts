@@ -73,8 +73,9 @@ export async function openStoreganiseCheckout(value: unknown) {
         session.storeganise_context.apiOrigin !== binding.apiOrigin) {
         throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
       }
-      if (reservation) {
-        if (!['open','declined'].includes(session.status) || needsLegacyPaymentReview(session)) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_REFRESH_REQUIRED');
+      // A newly created invoice can arrive during 3DS or after approval. Keep
+      // that session intact and return its existing status/receipt in both cases.
+      if (reservation && ['open','declined'].includes(session.status) && !needsLegacyPaymentReview(session)) {
         assertPayable(context);
         binding.sandboxActivation = session.storeganise_context.sandboxActivation;
         session = (await client.query<SessionRow>(`UPDATE pay_sessions SET invoice_id=$2,unit_id=$3,unit_name=$4,
@@ -133,8 +134,7 @@ export async function verifyStoreganiseCheckout(session: SessionRow) {
   }
   if (session.storeganise_context.kind === 'reservation') {
     const { prepareReservationForPayment } = await import('./reservation');
-    await prepareReservationForPayment(session);
-    if (isLiveStoreganiseSandbox(session)) return;
+    return prepareReservationForPayment(session);
   }
   if (isLiveStoreganiseSandbox(session) && (await getUser(session.customer_id)).isDisabled) {
     throw new StoreganiseIntegrationError('CUSTOMER_DISABLED', 403);

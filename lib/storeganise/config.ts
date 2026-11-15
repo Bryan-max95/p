@@ -51,3 +51,15 @@ export function storeganiseReturnUrl(value?: string): string {
   if (!isStoreganiseCustomerReturnUrl(candidate, url.origin)) return fallback;
   return candidate.href;
 }
+
+/** Once a booking is paid and occupied, return to the customer's units instead
+ * of reopening its billing step. A payment opened from an invoice keeps that
+ * invoice destination. The original return URL stays available for corrections. */
+export function storeganisePaidReturnUrl(value: string | undefined, booking: boolean): string {
+  const target = new URL(storeganiseReturnUrl(value));
+  if (booking && !/^\/account\/invoices\/[a-z0-9][a-z0-9_-]{0,63}\/?$/i.test(target.pathname)) {
+    return new URL('/account/units', target.origin).href;
+  }
+  target.searchParams.delete('pay');
+  return target.href;
+}

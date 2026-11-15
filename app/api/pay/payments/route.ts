@@ -16,6 +16,7 @@ export const maxDuration = 45;
 /** Starts authentication only. No authorization before its server-verified result. */
 export async function POST(req: NextRequest) {
   let attemptId: string | undefined;
+  let checkingStoreganise = false;
   try {
     assertSameOrigin(req);
     const session = await authenticatedSession();
@@ -36,7 +37,9 @@ export async function POST(req: NextRequest) {
     }
     const gateway = new CyberSourceGateway(session.environment);
     const token = await gateway.verifyTransientToken(data.transientToken, session.capture_context);
+    checkingStoreganise = Boolean(session.storeganise_context);
     await verifyStoreganiseCheckout(session);
+    checkingStoreganise = false;
     const attempt = await beginAttempt(session.id, token.tokenId, 'payment', data.billingDetails, session);
     attemptId = attempt.id;
     const setup = await gateway.setupAuthentication(token, attempt.reference);
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ session: publicSession(updated) }, { status: 402 });
     }
     if(error instanceof StoreganiseIntegrationError)return NextResponse.json({error:error.code},{status:error.httpStatus});
-    if(error instanceof StoreganiseApiError)return NextResponse.json({error:'STOREGANISE_CHECKOUT_UNAVAILABLE'},{status:503});
+    if(checkingStoreganise||error instanceof StoreganiseApiError)return NextResponse.json({error:'STOREGANISE_CHECKOUT_UNAVAILABLE'},{status:503});
     return NextResponse.json({ error: 'PAYMENT_NOT_STARTED' }, { status: 409 });
   }
 }

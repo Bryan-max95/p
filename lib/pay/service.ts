@@ -10,7 +10,7 @@ import { loadCredentials } from './credentials';
 import { needsLegacyPaymentReview } from './payment-state';
 import { paymentFailureCode } from './payment-feedback';
 import { billToSchema } from './billing-details';
-import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganiseReturnUrl } from '../storeganise/config';
+import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganisePaidReturnUrl, storeganiseReturnUrl } from '../storeganise/config';
 import { hasSandboxActivation, isLiveStoreganiseSandbox, storeganisePaymentWritesAllowed } from '../storeganise/payment-policy';
 import { BCH_INDICATOR_ID, type BchRate } from './bch';
 
@@ -121,7 +121,8 @@ export function publicSession(row: SessionRow) {
       storeganise: { status: isolatedSandbox ? 'sandbox_only' : row.storeganise_status ?? 'waiting_payment', paymentId: isolatedSandbox ? undefined : row.storeganise_payment_id ?? undefined,
         kind: row.storeganise_context.kind, invoiceReference: row.storeganise_context.invoiceReference,
         sandboxActivation: hasSandboxActivation(row),
-        returnUrl: storeganiseReturnUrl(row.return_url) },
+        returnUrl: storeganiseReturnUrl(row.return_url),
+        successUrl: storeganisePaidReturnUrl(row.return_url, Boolean(row.storeganise_context.jobId)) },
     } : {}),
     ...(row.is_demo ? { gatewayStatus: row.gateway_status, failureReason: row.failure_reason, transactionId: row.gateway_transaction_id } : {}),
     ...(row.status==='succeeded'&&row.gateway_transaction_id?{receipt:{authCode:row.authorization_code,transactionId:row.gateway_transaction_id,date:(row.paid_at??row.created_at).toISOString(),cardLast4:row.card_last4,cardBrand:row.card_brand,amount:Number(row.amount).toFixed(2),unit:row.unit_name,client:row.client_name,currency:row.currency,...(priceReference ? { priceReference } : {})}}:{}) };

@@ -769,8 +769,8 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                   </div>
 
                   {priceReference && <p className="text-xs leading-relaxed text-slate-600" data-testid="charge-disclosure">{exchangeNotice} {rateSource}</p>}
-                  {payment.session?.requiresReservationConfirmation && <p className="text-xs leading-relaxed text-slate-600">
-                    {lang==='es'?'Al continuar confirma la reserva y autoriza el pago del total mostrado.':'Continuing confirms your booking and authorizes payment of the displayed total.'}{' '}
+                  {(payment.session?.requiresReservationConfirmation || (!liveSandbox && payment.session?.storeganise?.kind==='reservation')) && <p className="text-xs leading-relaxed text-slate-600">
+                    {lang==='es'?'Al pagar autoriza el total mostrado. Cuando el banco apruebe el cobro, confirmaremos su reserva y registraremos el pago en Storeganise.':'By paying you authorize the displayed total. Once the bank approves the charge, we will confirm your booking and record its payment in Storeganise.'}{' '}
                     <a href={payment.session.storeganise?.returnUrl} rel="noreferrer" className="font-semibold underline">{lang==='es'?'Revisar mi reserva en Storeganise':'Review my Storeganise booking'}</a>
                   </p>}
                   <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between pt-2 gap-3">
@@ -871,7 +871,7 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                 </div>}
 
                 {payment.session?.receipt&&payment.session.storeganise&&['active','invoice_paid'].includes(payment.session.storeganise.status)&&
-                  <StoreganiseReturn sessionId={payment.session.id} url={payment.session.storeganise.returnUrl} language={lang} invoice={invoicePayment} />}
+                  <StoreganiseReturn sessionId={payment.session.id} url={payment.session.storeganise.successUrl ?? payment.session.storeganise.returnUrl} language={lang} invoice={invoicePayment} />}
 
                 {/* Recibo digital con bordes limpios */}
                 <div className="bg-[#f8fafc] rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4">
@@ -939,7 +939,8 @@ export default function PaymentCarousel({ manualEnabled = false }: { manualEnabl
                     <span>{t.btnPrintReceipt}</span>
                   </button>
 
-                  {payment.session?.storeganise ? <a href={payment.session.storeganise.returnUrl}
+                  {payment.session?.storeganise ? <a href={['active','invoice_paid'].includes(payment.session.storeganise.status)
+                    ? payment.session.storeganise.successUrl ?? payment.session.storeganise.returnUrl : payment.session.storeganise.returnUrl}
                     className="flex-1 py-3.5 rounded-xl bg-[#1F5C4F] hover:bg-[#17483e] text-white font-extrabold text-xs uppercase tracking-wider text-center">
                     {lang==='es'?'Volver a Storeganise':'Return to Storeganise'}
                   </a> : <button

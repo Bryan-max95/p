@@ -22,7 +22,7 @@ export function StoreganiseReturn({sessionId,url,language,invoice=false}:{sessio
   return <div className="text-center text-xs text-slate-600 space-y-2" role="status">
     <p>{invoice
       ? (language==='es'?'Volverá a su factura en Storeganise en 5 segundos.':'Returning to your Storeganise invoice in 5 seconds.')
-      : (language==='es'?'Volverá a su reserva en Storeganise en 5 segundos.':'Returning to your Storeganise booking in 5 seconds.')}</p>
+      : (language==='es'?'Volverá a su cuenta en Storeganise en 5 segundos.':'Returning to your Storeganise account in 5 seconds.')}</p>
     <button type="button" onClick={()=>setStay(true)} className="font-bold underline">
       {language==='es'?'Quedarme para guardar el comprobante':'Stay to save my receipt'}
     </button>

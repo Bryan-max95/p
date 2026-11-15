@@ -7,6 +7,8 @@ export function paymentFailureCode(reason: string | null | undefined, status: st
   if(['INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE'].includes(reason??''))return 'STOREGANISE_ORDER_CHANGED';
   if (status === 'AUTHORIZED_CAPTURE_FAILED') return 'CAPTURE_FAILED';
   if (status === 'AUTHORIZED_CAPTURE_UNCONFIRMED') return 'CAPTURE_NOT_CONFIRMED';
+  if (reason === 'STOREGANISE_RESERVATION_ACTION_REQUIRED') return reason;
+  if (reason?.startsWith('STOREGANISE_') || status === 'STOREGANISE_CHECKOUT_FAILED') return 'STOREGANISE_CHECKOUT_UNAVAILABLE';
   if (['HTTP_401', 'HTTP_403', 'HTTP_404', 'AUTHENTICATION_SETUP_FAILED'].includes(status ?? '') ||
     ['AUTHENTICATION_FAILED', 'SETUP_UNAVAILABLE'].includes(reason ?? '')) return 'SETUP_UNAVAILABLE';
   if (['EXPIRED_CARD', 'CARD_EXPIRED'].includes(reason ?? '')) return 'CARD_EXPIRED';
@@ -26,8 +28,11 @@ export function paymentFailureMessage(reason: string | undefined, status: string
   if(reason==='STOREGANISE_RESERVATION_PENDING')return say(language,'Storeganise todavía debe confirmar la reserva y preparar su registro de pago. Consulte el estado de su reserva antes de continuar. No se inició el cobro.','Storeganise still needs to confirm the booking and prepare its payment record. Check your booking before continuing. No charge was started.');
   if(reason==='STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED')return say(language,'Estamos pendientes de confirmar el envío de su reserva a Storeganise. Contacte a Roatan Self Storage si continúa pendiente. No se inició el cobro.','We are awaiting confirmation that your booking was submitted to Storeganise. Contact Roatan Self Storage if it remains pending. No charge was started.');
   if(reason==='STOREGANISE_RESERVATION_REFRESH_REQUIRED')return say(language,'La reserva se actualizó. Abra nuevamente el pago desde Storeganise para revisar el total. No se inició el cobro.','The booking was updated. Reopen payment from Storeganise to review the total. No charge was started.');
+  if(reason==='STOREGANISE_RESERVATION_ACTION_REQUIRED')return say(language,'Su reserva tiene un requisito pendiente en Storeganise. Regrese a su reserva para completarlo antes de pagar. No se inició el cobro.','Your booking has a pending requirement in Storeganise. Return to your booking to complete it before paying. No charge was started.');
   if(['STOREGANISE_ORDER_CHANGED','INVOICE_AMOUNT_CHANGED','INVOICE_NOT_PAYABLE','CUSTOMER_DISABLED','ORDER_NOT_ACTIVE'].includes(reason??''))return say(language,'La reserva o su saldo cambió en Storeganise. Regrese a su cuenta y abra nuevamente el enlace de pago.','Your booking or balance changed in Storeganise. Return to your account and open the payment link again.');
   if(reason==='BILLING_DETAILS_REQUIRED')return say(language,'Complete la dirección de facturación de su tarjeta para continuar.','Complete your card billing address to continue.');
+  if(reason==='STOREGANISE_CHECKOUT_UNAVAILABLE')return say(language,'No pudimos verificar los datos y el total con Storeganise. Intente más tarde o vuelva a su cuenta. No se inició el cobro.','We could not verify your details and total with Storeganise. Try later or return to your account. No charge was started.');
+  if(reason==='PAYMENT_NOT_STARTED')return say(language,'No se pudo iniciar el pago. Revise sus datos y vuelva a intentarlo.','Payment could not be started. Review your details and try again.');
   if(reason?.startsWith('STOREGANISE_'))return say(language,'No se pudo confirmar su reserva con Storeganise. Intente más tarde; no se inició el cobro.','Your booking could not be confirmed with Storeganise. Try later; no charge was started.');
   if (reason === 'CAPTURE_FAILED' || status === 'AUTHORIZED_CAPTURE_FAILED') {
     return say(language, 'La tarjeta fue autorizada, pero no se pudo completar el cobro. No repita el pago; contacte a Roatan Self Storage para revisar esta operación.', 'The card was authorized, but the payment could not be completed. Do not pay again; contact Roatan Self Storage to review this transaction.');

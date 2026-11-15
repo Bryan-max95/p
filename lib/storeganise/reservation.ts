@@ -1,12 +1,12 @@
 import crypto from 'node:crypto';
 import { z } from 'zod';
-import { customerGet, customerPut, authenticatedCustomerToken } from './customer';
+import { customerGet, authenticatedCustomerToken } from './customer';
 import { assertStoreganiseEnabled, assertStoreganiseTestCustomer, StoreganiseIntegrationError, storeganiseReturnUrl } from './config';
-import { isLiveStoreganiseSandbox } from './payment-policy';
 import { getJob, getUser, getUnit, assertOrderActive, assertPayable, sgId, usdAmount } from './records';
+import { assertReservationReadyToPay } from './move-in-steps';
 import { storeganiseGet, storeganiseRequest } from './client';
 import { openStoreganiseCheckout, resolveCheckout } from './checkout';
-import { query, transaction } from '../pay/db';
+import { transaction } from '../pay/db';
 import { createCheckoutSession, requiredUrl } from '../pay/service';
 import { currentBchRate, hnlCharge } from '../pay/exchange-rate';
 import { billToSchema } from '../pay/billing-details';
@@ -179,12 +179,14 @@ async function openReservationForContext(input: z.infer<typeof reservationInput>
   });
 }
 
-/** Revalidate a sandbox quote without changing the real booking or its ledger. */
-async function verifyLiveSandboxReservation(session: SessionRow) {
-  const { url, environment, liveSandbox } = assertStoreganiseEnabled();
+/** Read-only preflight, both before 3DS and immediately before authorization.
+ * The authenticated reservation and its current quote are sufficient to pay;
+ * confirmation and invoice creation belong to the post-payment delivery. */
+async function verifyReservationQuote(session: SessionRow) {
+  const { url, environment } = assertStoreganiseEnabled();
   assertStoreganiseTestCustomer(session.customer_id);
   const binding = session.storeganise_context!;
-  if (!liveSandbox || session.environment !== environment || binding.apiOrigin !== url.origin ||
+  if (session.environment !== environment || binding.apiOrigin !== url.origin ||
     binding.customerId !== session.customer_id || session.order_id !== binding.jobId ||
     session.unit_id !== (binding.selectedUnitId ?? binding.unitTypeId)) {
     throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
@@ -194,30 +196,41 @@ async function verifyLiveSandboxReservation(session: SessionRow) {
     throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
   }
   assertOrderActive(job);
-  if (job.result.unitTypeId !== binding.unitTypeId || (job.result.unitId ?? undefined) !== binding.selectedUnitId) {
+  assertReservationReadyToPay(job);
+  if (job.result.unitTypeId !== binding.unitTypeId || (binding.selectedUnitId && job.result.unitId !== binding.selectedUnitId)) {
     throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
   }
-  const user = await getUser(session.customer_id);
-  if (user.isDisabled) throw new StoreganiseIntegrationError('CUSTOMER_DISABLED', 403);
   let amount: string;
   if (job.result.invoiceId) {
     const resolved = await resolveCheckout({ userId: session.customer_id, orderId: job.id });
+    if (resolved.invoice.siteId !== binding.siteId || (binding.selectedUnitId && resolved.unit.id !== binding.selectedUnitId)) {
+      throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
+    }
     assertPayable(resolved);
     amount = usdAmount(resolved.invoice.balance);
   } else {
-    const settings = await storeganiseGet<{ currencyCode: string }>('/settings');
+    // Independent reads run together so a reservation does not spend the bank's
+    // authentication window waiting on a chain of Storeganise requests.
+    const [user, settings, unit, rawPreview] = await Promise.all([
+      getUser(session.customer_id),
+      storeganiseGet<{ currencyCode: string; manualPaymentMethods?: Array<{ code: string }> }>('/settings'),
+      job.result.unitId ? getUnit(job.result.unitId) : Promise.resolve(undefined),
+      storeganiseRequest(`/jobs/${job.id}/operations/previewInvoice`, 'POST'),
+    ]);
+    if (user.isDisabled) throw new StoreganiseIntegrationError('CUSTOMER_DISABLED', 403);
     if (settings.currencyCode !== 'USD') throw new StoreganiseIntegrationError('STOREGANISE_CURRENCY_MISMATCH');
-    if (binding.selectedUnitId) {
-      const unit = await getUnit(binding.selectedUnitId);
+    if (!settings.manualPaymentMethods?.some(method => method.code === (process.env.STOREGANISE_CARD_PAYMENT_METHOD ?? 'card'))) {
+      throw new StoreganiseIntegrationError('STOREGANISE_CARD_METHOD_NOT_CONFIGURED', 503);
+    }
+    if (unit) {
       if (unit.siteId !== binding.siteId || (unit.ownerId && unit.ownerId !== session.customer_id) ||
         ['archived', 'blocked', 'unassigned'].includes(unit.state)) {
         throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
       }
     }
-    // This POST only calculates Storeganise's quote. Never submit the real order,
-    // create its invoice or complete its steps for a simulated bank transaction.
-    const preview = z.object({ total: z.number().finite() }).parse(
-      await storeganiseRequest(`/jobs/${job.id}/operations/previewInvoice`, 'POST'));
+    // This POST only calculates Storeganise's quote. It does not submit an order,
+    // create an invoice or acknowledge any booking step before bank approval.
+    const preview = z.object({ total: z.number().finite() }).parse(rawPreview);
     amount = usdAmount(preview.total);
   }
   if (amount !== Number(session.reference_usd_amount).toFixed(2)) {
@@ -225,29 +238,14 @@ async function verifyLiveSandboxReservation(session: SessionRow) {
   }
 }
 
-/** Real financial collection requires a confirmed order and its exact ledger.
- * Sandbox with live Storeganise only revalidates the quote; it never submits it. */
+/** Keep the original authenticated handoff and quote throughout 3DS. A later
+ * invoice must not replace the session binding while authorization is in flight. */
 export async function prepareReservationForPayment(session: SessionRow) {
   const binding = session.storeganise_context;
   if (binding?.kind !== 'reservation' || !binding.jobId) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-  if (isLiveStoreganiseSandbox(session)) return verifyLiveSandboxReservation(session);
-  if (binding.reservationAuthentication === 'signed-checkout' || binding.reservationAuthentication === 'profile-bridge') {
-    const { url, environment } = assertStoreganiseEnabled();
-    const job = await getJob(binding.jobId);
-    if (url.origin !== binding.apiOrigin || environment !== session.environment ||
-      job.ownerId !== session.customer_id || job.ownerId !== binding.customerId ||
-      job.type !== 'unit_moveIn' || job.result.siteId !== binding.siteId ||
-      (binding.selectedUnitId && job.result.unitId !== binding.selectedUnitId)) {
-      throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-    }
-    assertOrderActive(job);
-    if (binding.unitTypeId && job.result.unitTypeId !== binding.unitTypeId) {
-      throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
-    }
-    // Identity verification does not replace booking/contract confirmation.
-    // Storeganise must accept the order before Pay collects money against it.
-    if (!job.result.invoiceId) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_PENDING', 409);
-  } else {
+  if (!['signed-checkout', 'profile-bridge'].includes(binding.reservationAuthentication ?? '')) {
+    // Legacy customer-token sessions still need their authenticated customer;
+    // an order ID or browser-supplied user ID never authorizes a payment.
     const token = await authenticatedCustomerToken();
     const context = await readReservation(token, binding.jobId);
     if (context.customerId !== session.customer_id || context.url.origin !== binding.apiOrigin ||
@@ -256,47 +254,6 @@ export async function prepareReservationForPayment(session: SessionRow) {
     if (binding.selectedUnitId && (context.order.unitId ?? context.job.result.unitId) !== binding.selectedUnitId) {
       throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
     }
-    if (!context.job.result.invoiceId) {
-      if (!context.order.invoicePreview || usdAmount(context.order.invoicePreview.total) !== Number(session.reference_usd_amount).toFixed(2)) {
-        throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
-      }
-      if (context.order.orderState === 'notSubmitted') {
-        const claimed = await query(`UPDATE pay_sessions SET storeganise_submit_started=true,updated_at=now()
-          WHERE id=$1 AND storeganise_submit_started=false AND status IN ('open','declined') AND expires_at>now()
-            AND reference_usd_amount=$2 AND storeganise_context->>'kind'='reservation' RETURNING id`,
-        [session.id, session.reference_usd_amount]);
-        // Another request, a timeout or a crash may already have submitted this order.
-        // Observe its state on the next attempt instead of repeating a write blindly.
-        if (!claimed.rowCount) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_SUBMIT_REVIEW_REQUIRED');
-        // The same customer-scoped submit operation used by Storeganise's review step.
-        // Do not complete admin steps, fabricate payment sources, or skip agreements.
-        await customerPut(token, `/units/orders/${binding.jobId}`, {
-          siteId: context.order.siteId, unitTypeId: context.order.unitTypeId,
-          startDate: context.order.startDate, submitNow: true,
-        });
-      }
-    }
   }
-  const job = await getJob(binding.jobId);
-  if (!job.result.invoiceId) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_PENDING', 409);
-  const resolved = await resolveCheckout({ userId: session.customer_id, orderId: binding.jobId, returnUrl: session.return_url });
-  if (usdAmount(resolved.invoice.balance) !== Number(session.reference_usd_amount).toFixed(2)) throw new StoreganiseIntegrationError('INVOICE_AMOUNT_CHANGED');
-  await transaction(async client => {
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg-order:${session.environment}:${binding.jobId}`]);
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg:${session.environment}:${resolved.invoice.id}`]);
-    const locked = (await client.query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1 FOR UPDATE', [session.id])).rows[0];
-    if (!locked || !['open', 'declined'].includes(locked.status) || needsLegacyPaymentReview(locked) ||
-      locked.expires_at.getTime() <= Date.now() || locked.amount !== session.amount || locked.capture_context !== session.capture_context ||
-      Number(locked.reference_usd_amount).toFixed(2) !== Number(session.reference_usd_amount).toFixed(2)) {
-      throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_REFRESH_REQUIRED');
-    }
-    if (locked.invoice_id && locked.invoice_id !== resolved.invoice.id) throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH', 403);
-    const other = await client.query('SELECT id FROM pay_sessions WHERE environment=$1 AND invoice_id=$2 AND id<>$3',
-      [session.environment, resolved.invoice.id, session.id]);
-    if (other.rowCount) throw new StoreganiseIntegrationError('STOREGANISE_RESERVATION_REFRESH_REQUIRED');
-    const updated = await client.query<SessionRow>(`UPDATE pay_sessions SET invoice_id=$2,unit_id=$3,unit_name=$4,
-      storeganise_context=$5,updated_at=now() WHERE id=$1 RETURNING *`,
-    [session.id, resolved.invoice.id, resolved.unit.id, resolved.unit.name, JSON.stringify(resolved.binding)]);
-    Object.assign(session, updated.rows[0]);
-  });
+  await verifyReservationQuote(session);
 }

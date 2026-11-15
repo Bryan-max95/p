@@ -4,12 +4,10 @@ import { StoreganiseIntegrationError } from './config';
 import { storeganiseRequest } from './client';
 import { assertOrderActive, getJob, getUnit, invoiceContext, usdAmount } from './records';
 import { storeganisePaymentWritesAllowed } from './payment-policy';
+import { confirmationSteps, invoiceSteps, occupancySteps } from './move-in-steps';
 
 type Job = Awaited<ReturnType<typeof getJob>>;
 type Step = Job['steps'][number];
-const confirmationSteps = new Set(['await_submitOrder', 'await_confirmOrder', 'order_confirm']);
-const invoiceSteps = new Set(['invoice_createInitial', 'await_chargeInvoice', 'invoice_confirm']);
-const occupancySteps = new Set(['await_confirmMovedIn', 'confirm_occupy']);
 
 function assertPaid(session: SessionRow) {
   if (session.status !== 'succeeded' || !session.gateway_transaction_id || !session.paid_at || session.is_demo ||
@@ -48,8 +46,8 @@ async function completeStep(session: SessionRow, job: Job, step: Step) {
     WHERE session_id=$1 AND job_id=$2 AND step_id=$3`, [session.id,job.id,step.id]);
 }
 
-/** Only runs after bank confirmation. The original sandbox checkout remains
- * read-only until then, so declines never confirm or occupy a real reservation. */
+/** Only runs after bank confirmation. Checkout leaves the booking untouched
+ * until then, so declines never confirm or occupy a reservation. */
 export async function bindPaidReservation(session: SessionRow): Promise<boolean> {
   assertPaid(session);
   const binding = session.storeganise_context!;
@@ -85,11 +83,17 @@ export async function bindPaidReservation(session: SessionRow): Promise<boolean>
   const nextBinding = { ...binding, kind: 'invoice' as const, invoiceId: context.invoice.id,
     rentalId: context.rental.id, unitId: context.unit.id };
   await transaction(async client => {
-    // Serialize binding this paid reservation to its exact invoice.
+    // Use checkout's lock order too: reopening the same reservation/invoice
+    // must recover this payment, never create a second payable session.
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg-order:${session.environment}:${binding.jobId}`]);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg:${session.environment}:${context.invoice.id}`]);
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`pay-sg-paid:${binding.apiOrigin}:${context.invoice.id}`]);
     const saved = (await client.query<SessionRow>('SELECT * FROM pay_sessions WHERE id=$1 FOR UPDATE', [session.id])).rows[0];
     if (!saved || saved.status !== 'succeeded' || saved.gateway_transaction_id !== session.gateway_transaction_id ||
       saved.customer_id !== session.customer_id || saved.order_id !== session.order_id || saved.amount !== session.amount ||
+      saved.storeganise_context?.apiOrigin !== binding.apiOrigin || saved.storeganise_context?.jobId !== binding.jobId ||
+      saved.storeganise_context?.customerId !== binding.customerId || saved.storeganise_context?.siteId !== binding.siteId ||
+      saved.reference_usd_amount !== session.reference_usd_amount ||
       saved.storeganise_context?.sandboxActivation !== binding.sandboxActivation) {
       throw new StoreganiseIntegrationError('STOREGANISE_IDENTITY_MISMATCH');
     }

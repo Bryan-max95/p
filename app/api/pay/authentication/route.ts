@@ -5,6 +5,7 @@ import { activeAttempt, claimAuthentication, finishAttempt, publicSession } from
 import { assertAuthenticationUrl, CyberSourceGateway, GatewayError } from '@/lib/cybersource/gateway';
 import { verifyStoreganiseCheckout } from '@/lib/storeganise/checkout';
 import { StoreganiseIntegrationError } from '@/lib/storeganise/config';
+import { StoreganiseApiError } from '@/lib/storeganise/client';
 import { syncStoreganiseSession } from '@/lib/storeganise/sync';
 import { storeganisePaymentWritesAllowed } from '@/lib/storeganise/payment-policy';
 
@@ -16,6 +17,7 @@ const requestSchema = z.object({ transientToken: z.string().min(100).max(30000),
 export async function POST(req: NextRequest) {
   let attemptId: string | undefined;
   let authorizationStarted = false;
+  let checkingStoreganise = false;
   try {
     assertSameOrigin(req);
     const session = await authenticatedSession();
@@ -56,7 +58,9 @@ export async function POST(req: NextRequest) {
         } });
       return NextResponse.json({ session: publicSession(updated) }, { status: 402 });
     }
+    checkingStoreganise = Boolean(session.storeganise_context);
     await verifyStoreganiseCheckout(session);
+    checkingStoreganise = false;
     authorizationStarted = true;
     // Already verified: never request VALIDATE a second time during authorization.
     const result = await gateway.pay({ token, reference: attempt.reference, amount: Number(session.amount).toFixed(2), currency: session.currency,
@@ -68,9 +72,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ session: publicSession(updated) }, { status: result.status === 'declined' ? 402 : 200 });
   } catch (error) {
     if (attemptId) {
+      const storeganiseFailure = error instanceof StoreganiseIntegrationError ? error.code :
+        checkingStoreganise || error instanceof StoreganiseApiError ? 'STOREGANISE_CHECKOUT_UNAVAILABLE' : undefined;
+      if (storeganiseFailure) console.error('[PAY_STOREGANISE_PREFLIGHT]', { code: storeganiseFailure });
       const updated = await finishAttempt(attemptId, { status: authorizationStarted ? 'unknown' : 'declined',
-        gatewayStatus: authorizationStarted ? 'PAYMENT_UNCERTAIN' : 'AUTHENTICATION_FAILED',
-        reason: error instanceof GatewayError ? error.reason : error instanceof StoreganiseIntegrationError ? error.code : 'AUTHENTICATION_NOT_CONFIRMED' });
+        gatewayStatus: authorizationStarted ? 'PAYMENT_UNCERTAIN' : storeganiseFailure ? 'STOREGANISE_CHECKOUT_FAILED' : 'AUTHENTICATION_FAILED',
+        reason: storeganiseFailure ?? (error instanceof GatewayError ? error.reason : 'AUTHENTICATION_NOT_CONFIRMED') });
       return NextResponse.json({ session: publicSession(updated) }, { status: authorizationStarted ? 202 : 402 });
     }
     return NextResponse.json({ error: 'AUTHENTICATION_FAILED' }, { status: 409 });
